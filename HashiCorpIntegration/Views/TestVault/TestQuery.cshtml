@@ -1,0 +1,23 @@
+﻿@model HashiCorpIntegration.Controllers.DatabaseQueryTestViewModel
+@{
+    ViewData["Title"] = "Database Query Test";
+}
+
+<div class="container mt-4">
+    <h2>Database Query Test</h2>
+
+    @if (Model.Success)
+    {
+        <div class="alert alert-success">
+            <strong>Categories Count:</strong> @Model.CategoriesCount <br />
+            <strong>Products Count:</strong> @Model.ProductsCount <br />
+            <strong>Executed At:</strong> @Model.QueryExecutionTime
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-danger">
+            <strong>Error:</strong> @Model.Error
+        </div>
+    }
+</div>
