@@ -5,19 +5,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HashiCorpIntegration.Controllers;
 
-public class ProductController : Controller
+public class ProductController(IApplicationDbContext context) : Controller
 {
-    private readonly IApplicationDbContextFactory _contextFactory;
-
-    public ProductController(IApplicationDbContextFactory contextFactory)
-    {
-        _contextFactory = contextFactory;
-    }
+    private readonly IApplicationDbContext _context = context;
 
     // GET: Product
     public async Task<IActionResult> Index()
     {
-        using var context = await _contextFactory.CreateDbContextAsync();
         var products = await context.Products.Include(p => p.Category).ToListAsync();
         return View(products);
     }
@@ -27,7 +21,6 @@ public class ProductController : Controller
     {
         if (id == null) return NotFound();
 
-        using var context = await _contextFactory.CreateDbContextAsync();
         var product = await context.Products.Include(p => p.Category)
             .FirstOrDefaultAsync(m => m.Id == id);
         if (product == null) return NotFound();
@@ -38,7 +31,6 @@ public class ProductController : Controller
     // GET: Product/Create
     public async Task<IActionResult> Create()
     {
-        using var context = await _contextFactory.CreateDbContextAsync();
         ViewData["CategoryId"] = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(
             context.Categories, "Id", "Name"
         );
@@ -52,18 +44,14 @@ public class ProductController : Controller
     {
         if (ModelState.IsValid)
         {
-            using var context = await _contextFactory.CreateDbContextAsync();
-            context.Add(product);
+            context.Products.Add(product);
             await context.SaveChangesAsync();
             return RedirectToAction(nameof(Index));
         }
 
-        using (var context = await _contextFactory.CreateDbContextAsync())
-        {
-            ViewData["CategoryId"] = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(
-                context.Categories, "Id", "Name", product.CategoryId
-            );
-        }
+        ViewData["CategoryId"] = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(
+            context.Categories, "Id", "Name", product.CategoryId
+        );
         return View(product);
     }
 
@@ -72,7 +60,6 @@ public class ProductController : Controller
     {
         if (id == null) return NotFound();
 
-        using var context = await _contextFactory.CreateDbContextAsync();
         var product = await context.Products.FindAsync(id);
         if (product == null) return NotFound();
 
@@ -91,10 +78,9 @@ public class ProductController : Controller
 
         if (ModelState.IsValid)
         {
-            using var context = await _contextFactory.CreateDbContextAsync();
             try
             {
-                context.Update(product);
+                context.Products.Update(product);
                 await context.SaveChangesAsync();
             }
             catch (DbUpdateConcurrencyException)
@@ -107,12 +93,9 @@ public class ProductController : Controller
             return RedirectToAction(nameof(Index));
         }
 
-        using (var context = await _contextFactory.CreateDbContextAsync())
-        {
-            ViewData["CategoryId"] = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(
-                context.Categories, "Id", "Name", product.CategoryId
-            );
-        }
+        ViewData["CategoryId"] = new Microsoft.AspNetCore.Mvc.Rendering.SelectList(
+            context.Categories, "Id", "Name", product.CategoryId
+        );
         return View(product);
     }
 
@@ -121,7 +104,6 @@ public class ProductController : Controller
     {
         if (id == null) return NotFound();
 
-        using var context = await _contextFactory.CreateDbContextAsync();
         var product = await context.Products.Include(p => p.Category)
             .FirstOrDefaultAsync(m => m.Id == id);
         if (product == null) return NotFound();
@@ -134,7 +116,6 @@ public class ProductController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> DeleteConfirmed(int id)
     {
-        using var context = await _contextFactory.CreateDbContextAsync();
         var product = await context.Products.FindAsync(id);
         if (product != null)
         {

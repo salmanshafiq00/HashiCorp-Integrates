@@ -2,6 +2,7 @@
 
 public class VaultSettings
 {
+    public const string SectionName = "Vault";
     public string VaultUrl { get; set; } = string.Empty;
     public string VaultToken { get; set; } = string.Empty;
     public string DatabaseRole { get; set; } = string.Empty;

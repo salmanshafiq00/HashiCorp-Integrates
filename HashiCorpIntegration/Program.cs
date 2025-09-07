@@ -1,11 +1,11 @@
 using HashiCorpIntegration.Data;
+using HashiCorpIntegration.Jobs;
 using HashiCorpIntegration.Vault;
-using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure Vault settings
-builder.Services.Configure<VaultSettings>(builder.Configuration.GetSection("Vault"));
+builder.Services.Configure<VaultSettings>(builder.Configuration.GetSection(VaultSettings.SectionName));
 
 // Add services
 builder.Services.AddMemoryCache();
@@ -30,6 +30,16 @@ builder.Services.AddScoped<IConnectionStringProvider, VaultConnectionStringProvi
 
 // Register the DbContext Factory
 builder.Services.AddScoped<IApplicationDbContextFactory, ApplicationDbContextFactory>();
+
+// Remove the commented DbContext registrations and factory registration
+// Add these instead:
+
+builder.Services.AddScoped<IDynamicDbContextProvider, DynamicDbContextProvider>();
+builder.Services.AddScoped<IApplicationDbContext>(provider =>
+    provider.GetRequiredService<IDynamicDbContextProvider>().GetContext());
+
+// Add the background service
+builder.Services.AddHostedService<VaultCredentialRefreshService>();
 
 // Then use a background service to update connection string if needed
 

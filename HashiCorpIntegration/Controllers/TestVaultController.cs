@@ -5,22 +5,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HashiCorpIntegration.Controllers;
 
-public class TestVaultController : Controller
+public class TestVaultController(
+    IVaultService vaultService,
+    IApplicationDbContextFactory dbContextFactory,
+    ILogger<TestVaultController> logger) : Controller
 {
-    private readonly IVaultService _vaultService;
-    private readonly IApplicationDbContextFactory _dbContextFactory;
-    private readonly ILogger<TestVaultController> _logger;
-
-    public TestVaultController(
-        IVaultService vaultService,
-        IApplicationDbContextFactory dbContextFactory,
-        ILogger<TestVaultController> logger)
-    {
-        _vaultService = vaultService;
-        _dbContextFactory = dbContextFactory;
-        _logger = logger;
-    }
-
     public async Task<IActionResult> Index()
     {
         var model = new VaultTestResultViewModel();
@@ -28,29 +17,29 @@ public class TestVaultController : Controller
         // Test Vault connection
         try
         {
-            model.VaultConnectionString = await _vaultService.GetSqlConnectionStringAsync();
+            model.VaultConnectionString = await vaultService.GetSqlConnectionStringAsync();
             model.VaultConnectionSuccess = !string.IsNullOrEmpty(model.VaultConnectionString);
-            _logger.LogInformation("Successfully retrieved connection string from Vault");
+            logger.LogInformation("Successfully retrieved connection string from Vault");
         }
         catch (Exception ex)
         {
             model.VaultConnectionSuccess = false;
             model.VaultError = ex.Message;
-            _logger.LogError(ex, "Vault connection test failed");
+            logger.LogError(ex, "Vault connection test failed");
         }
 
         // Test Database connection using factory
         try
         {
-            using var dbContext = await _dbContextFactory.CreateDbContextAsync();
+            using var dbContext = await dbContextFactory.CreateDbContextAsync();
             model.DatabaseConnectionSuccess = await dbContext.Database.CanConnectAsync();
-            _logger.LogInformation("Successfully connected to database using dynamic connection");
+            logger.LogInformation("Successfully connected to database using dynamic connection");
         }
         catch (Exception ex)
         {
             model.DatabaseConnectionSuccess = false;
             model.DatabaseError = ex.Message;
-            _logger.LogError(ex, "Database connection test failed");
+            logger.LogError(ex, "Database connection test failed");
         }
 
         return View(model);
@@ -62,7 +51,7 @@ public class TestVaultController : Controller
 
         try
         {
-            using var dbContext = await _dbContextFactory.CreateDbContextAsync();
+            using var dbContext = await dbContextFactory.CreateDbContextAsync();
 
             // Test a simple query
             var categoriesCount = await dbContext.Categories.CountAsync();
@@ -73,14 +62,14 @@ public class TestVaultController : Controller
             model.ProductsCount = productsCount;
             model.QueryExecutionTime = DateTime.Now;
 
-            _logger.LogInformation("Database query test successful - Categories: {CategoriesCount}, Products: {ProductsCount}",
+            logger.LogInformation("Database query test successful - Categories: {CategoriesCount}, Products: {ProductsCount}",
                 categoriesCount, productsCount);
         }
         catch (Exception ex)
         {
             model.Success = false;
             model.Error = ex.Message;
-            _logger.LogError(ex, "Database query test failed");
+            logger.LogError(ex, "Database query test failed");
         }
 
         return View(model);
@@ -92,7 +81,7 @@ public class TestVaultController : Controller
 
         try
         {
-            var connectionString = await _vaultService.GetSqlConnectionStringAsync();
+            var connectionString = await vaultService.GetSqlConnectionStringAsync();
 
             // Parse connection string to extract username (safely)
             var parts = connectionString.Split(';');
@@ -106,13 +95,13 @@ public class TestVaultController : Controller
             }
 
             model.RetrievedAt = DateTime.Now;
-            _logger.LogInformation("Retrieved credential info for username: {Username}", model.Username);
+            logger.LogInformation("Retrieved credential info for username: {Username}", model.Username);
         }
         catch (Exception ex)
         {
             model.Success = false;
             model.Error = ex.Message;
-            _logger.LogError(ex, "Failed to retrieve credential info");
+            logger.LogError(ex, "Failed to retrieve credential info");
         }
 
         return View(model);
@@ -130,7 +119,7 @@ public class TestVaultController : Controller
 
         try
         {
-            await _vaultService.GetSqlConnectionStringAsync();
+            await vaultService.GetSqlConnectionStringAsync();
             health = health with { vault = health.vault with { healthy = true } };
         }
         catch (Exception ex)
@@ -140,7 +129,7 @@ public class TestVaultController : Controller
 
         try
         {
-            using var dbContext = await _dbContextFactory.CreateDbContextAsync();
+            using var dbContext = await dbContextFactory.CreateDbContextAsync();
             await dbContext.Database.CanConnectAsync();
             health = health with { database = health.database with { healthy = true } };
         }

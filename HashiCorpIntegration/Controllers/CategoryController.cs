@@ -5,19 +5,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HashiCorpIntegration.Controllers;
 
-public class CategoryController : Controller
+public class CategoryController(IApplicationDbContext context) : Controller
 {
-    private readonly IApplicationDbContextFactory _contextFactory;
-
-    public CategoryController(IApplicationDbContextFactory contextFactory)
-    {
-        _contextFactory = contextFactory;
-    }
 
     // GET: Category
     public async Task<IActionResult> Index()
     {
-        using var context = await _contextFactory.CreateDbContextAsync();
         return View(await context.Categories.ToListAsync());
     }
 
@@ -25,8 +18,6 @@ public class CategoryController : Controller
     public async Task<IActionResult> Details(int? id)
     {
         if (id == null) return NotFound();
-
-        using var context = await _contextFactory.CreateDbContextAsync();
         var category = await context.Categories.FindAsync(id);
         if (category == null) return NotFound();
         return View(category);
@@ -45,8 +36,7 @@ public class CategoryController : Controller
     {
         if (ModelState.IsValid)
         {
-            using var context = await _contextFactory.CreateDbContextAsync();
-            context.Add(category);
+            context.Categories.Add(category);
             await context.SaveChangesAsync();
             return RedirectToAction(nameof(Index));
         }
@@ -57,8 +47,6 @@ public class CategoryController : Controller
     public async Task<IActionResult> Edit(int? id)
     {
         if (id == null) return NotFound();
-
-        using var context = await _contextFactory.CreateDbContextAsync();
         var category = await context.Categories.FindAsync(id);
         if (category == null) return NotFound();
         return View(category);
@@ -73,10 +61,9 @@ public class CategoryController : Controller
 
         if (ModelState.IsValid)
         {
-            using var context = await _contextFactory.CreateDbContextAsync();
             try
             {
-                context.Update(category);
+                context.Categories.Update(category);
                 await context.SaveChangesAsync();
             }
             catch (DbUpdateConcurrencyException)
@@ -95,7 +82,6 @@ public class CategoryController : Controller
     {
         if (id == null) return NotFound();
 
-        using var context = await _contextFactory.CreateDbContextAsync();
         var category = await context.Categories.FindAsync(id);
         if (category == null) return NotFound();
         return View(category);
@@ -106,7 +92,6 @@ public class CategoryController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> DeleteConfirmed(int id)
     {
-        using var context = await _contextFactory.CreateDbContextAsync();
         var category = await context.Categories.FindAsync(id);
         if (category != null)
         {
