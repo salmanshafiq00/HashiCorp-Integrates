@@ -13,36 +13,20 @@ builder.Services.Configure<VaultSettings>(builder.Configuration.GetSection(Vault
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IVaultService, VaultService>();
 
-// Register DbContext with factory function that resolves connection string at runtime
-//builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
-//{
-//    // This will be called each time a DbContext is needed
-//    var vaultService = serviceProvider.GetRequiredService<IVaultService>();
-//    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
-
-//    string connectionString;
-//    try
-//    {
-//        connectionString = vaultService.GetSqlConnectionStringAsync().GetAwaiter().GetResult();
-//    }
-//    catch
-//    {
-//        // Fallback to static connection string
-//        connectionString = configuration.GetConnectionString("DefaultConnection")!;
-//    }
-
-//    options.UseSqlServer(connectionString);
-//});
-
 builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
 {
     var vaultService = serviceProvider.GetRequiredService<IVaultService>();
     var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     var logger = serviceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
 
-    // Create a connection string provider that can refresh on failures
-    options.UseSqlServer(connectionString => GetConnectionStringWithRetry(vaultService, configuration, logger));
+    var connectionString = GetConnectionStringWithRetry(vaultService, configuration, logger);
+
+    // Create a SqlConnection that EF Core will reuse when needed
+    var connection = new SqlConnection(connectionString);
+
+    options.UseSqlServer(connection);
 });
+
 
 // Register the interface
 builder.Services.AddScoped<IApplicationDbContext>(provider =>
