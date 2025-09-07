@@ -1,6 +1,8 @@
 using HashiCorpIntegration.Data;
 using HashiCorpIntegration.Jobs;
 using HashiCorpIntegration.Vault;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,39 +11,45 @@ builder.Services.Configure<VaultSettings>(builder.Configuration.GetSection(Vault
 
 // Add services
 builder.Services.AddMemoryCache();
-builder.Services.AddScoped<IVaultService, VaultService>();
-builder.Services.AddScoped<IConnectionStringProvider, VaultConnectionStringProvider>();
+builder.Services.AddSingleton<IVaultService, VaultService>();
 
-// Configure DbContext with connection string provider
+// Register DbContext with factory function that resolves connection string at runtime
 //builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
 //{
-//    // Use fallback connection string for initial setup
+//    // This will be called each time a DbContext is needed
+//    var vaultService = serviceProvider.GetRequiredService<IVaultService>();
 //    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
-//    var fallbackConnectionString = configuration.GetConnectionString("DefaultConnection");
-//    options.UseSqlServer(fallbackConnectionString);
-//});
 
-//builder.Services.AddDbContext<ApplicationDbContext>(async (serviceProvider, options) =>
-//{
-//    var connectionStringProvider = serviceProvider.GetRequiredService<IConnectionStringProvider>();
-//    var connectionString = await connectionStringProvider.GetConnectionStringAsync();
+//    string connectionString;
+//    try
+//    {
+//        connectionString = vaultService.GetSqlConnectionStringAsync().GetAwaiter().GetResult();
+//    }
+//    catch
+//    {
+//        // Fallback to static connection string
+//        connectionString = configuration.GetConnectionString("DefaultConnection")!;
+//    }
+
 //    options.UseSqlServer(connectionString);
 //});
 
-// Register the DbContext Factory
-builder.Services.AddScoped<IApplicationDbContextFactory, ApplicationDbContextFactory>();
+builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
+{
+    var vaultService = serviceProvider.GetRequiredService<IVaultService>();
+    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
+    var logger = serviceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
 
-// Remove the commented DbContext registrations and factory registration
-// Add these instead:
+    // Create a connection string provider that can refresh on failures
+    options.UseSqlServer(connectionString => GetConnectionStringWithRetry(vaultService, configuration, logger));
+});
 
-builder.Services.AddScoped<IDynamicDbContextProvider, DynamicDbContextProvider>();
+// Register the interface
 builder.Services.AddScoped<IApplicationDbContext>(provider =>
-    provider.GetRequiredService<IDynamicDbContextProvider>().GetContext());
+    provider.GetRequiredService<ApplicationDbContext>());
 
 // Add the background service
 builder.Services.AddHostedService<VaultCredentialRefreshService>();
-
-// Then use a background service to update connection string if needed
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
@@ -52,24 +60,12 @@ var app = builder.Build();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-else
-{
 
-    //using (var scope = app.Services.CreateScope())
-    //{
-    //    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    //    dbContext.Database.Migrate();
-    //}
-}
-
-    app.UseHttpsRedirection();
+app.UseHttpsRedirection();
 app.UseStaticFiles();
-
 app.UseRouting();
-
 app.UseAuthorization();
 
 app.MapControllerRoute(
@@ -78,3 +74,31 @@ app.MapControllerRoute(
 
 app.Run();
 
+
+static string GetConnectionStringWithRetry(IVaultService vaultService, IConfiguration configuration, ILogger logger)
+{
+    try
+    {
+        return vaultService.GetSqlConnectionStringAsync().GetAwaiter().GetResult();
+    }
+    catch (SqlException ex) when (ex.Number == 18456) // Login failed
+    {
+        logger.LogWarning("Database login failed, invalidating cache and retrying");
+        vaultService.InvalidateConnectionCache();
+
+        try
+        {
+            return vaultService.GetSqlConnectionStringAsync().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            logger.LogError("Failed to get new credentials, falling back to static connection");
+            return configuration.GetConnectionString("DefaultConnection")!;
+        }
+    }
+    catch
+    {
+        logger.LogError("Failed to get vault credentials, using fallback connection");
+        return configuration.GetConnectionString("DefaultConnection")!;
+    }
+}

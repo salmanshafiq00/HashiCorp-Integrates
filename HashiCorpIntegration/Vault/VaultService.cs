@@ -12,6 +12,7 @@ public class VaultService : IVaultService
     private readonly ILogger<VaultService> _logger;
     private readonly IMemoryCache _cache;
     private readonly VaultClient _vaultClient;
+    private readonly string _connectionCacheKey = "vault_db_connection";
 
     public VaultService(IOptions<VaultSettings> vaultSettings, ILogger<VaultService> logger, IMemoryCache cache)
     {
@@ -25,7 +26,6 @@ public class VaultService : IVaultService
     {
         try
         {
-            // Use Token authentication for dev mode
             var vaultClientSettings = new VaultClientSettings(_vaultSettings.VaultUrl,
                 new TokenAuthMethodInfo(_vaultSettings.VaultToken));
             return new VaultClient(vaultClientSettings);
@@ -37,40 +37,28 @@ public class VaultService : IVaultService
         }
     }
 
-    public async Task<string> GetDynamicConnectionStringAsync()
+    public async Task<string> GetSqlConnectionStringAsync()
     {
-        const string cacheKey = "vault_db_connection";
-
-        if (_cache.TryGetValue(cacheKey, out string cachedConnectionString))
-        {
-            _logger.LogDebug("Retrieved database connection from cache");
-            return cachedConnectionString;
-        }
+        //if (_cache.TryGetValue(_connectionCacheKey, out string cachedConnectionString))
+        //{
+        //    _logger.LogDebug("Retrieved database connection from cache");
+        //    return cachedConnectionString;
+        //}
 
         try
         {
-            // Get dynamic database credentials
             var credentials = await _vaultClient.V1.Secrets.Database.GetCredentialsAsync(_vaultSettings.DatabaseRole);
 
-            var username = credentials.Data.Username;
-            var password = credentials.Data.Password;
+            var connectionString = $"Server={_vaultSettings.DatabaseServer};Database={_vaultSettings.DatabaseName};User Id={credentials.Data.Username};Password={credentials.Data.Password};TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30";
 
-            // Build connection string with dynamic credentials
-            var connectionString = $"Server={_vaultSettings.DatabaseServer};Database={_vaultSettings.DatabaseName};User Id={username};Password={password};TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30";
-
-            // Validate the connection before caching
+            // Validate connection before caching
             if (!await ValidateConnectionAsync(connectionString))
             {
                 throw new InvalidOperationException("Dynamic credentials are valid but database connection failed. Check user permissions.");
             }
 
-            // Cache for a shorter time than the lease duration
-            var cacheOptions = new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(50),
-                Priority = CacheItemPriority.High
-            };
-            _cache.Set(cacheKey, connectionString, cacheOptions);
+            // Cache with shorter expiration than lease duration
+            _cache.Set(_connectionCacheKey, connectionString, TimeSpan.FromMinutes(50));
 
             _logger.LogInformation("Retrieved and cached dynamic database credentials");
             return connectionString;
@@ -82,16 +70,20 @@ public class VaultService : IVaultService
         }
     }
 
-    // Keep existing methods for backward compatibility
+    public void InvalidateConnectionCache()
+    {
+        _cache.Remove(_connectionCacheKey);
+        _logger.LogInformation("Connection string cache invalidated");
+    }
+
     public async Task<string> GetSecretAsync(string path, string key)
     {
-        // Implementation stays the same...
         var cacheKey = $"vault_{path}_{key}";
 
-        if (_cache.TryGetValue(cacheKey, out string cachedValue))
-        {
-            return cachedValue;
-        }
+        //if (_cache.TryGetValue(cacheKey, out string cachedValue))
+        //{
+        //    return cachedValue;
+        //}
 
         try
         {
@@ -99,12 +91,7 @@ public class VaultService : IVaultService
             if (secret?.Data?.Data != null && secret.Data.Data.TryGetValue(key, out var value))
             {
                 var secretValue = value.ToString();
-                var cacheOptions = new MemoryCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
-                    Priority = CacheItemPriority.High
-                };
-                _cache.Set(cacheKey, secretValue, cacheOptions);
+                _cache.Set(cacheKey, secretValue, TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes));
                 return secretValue;
             }
             throw new KeyNotFoundException($"Secret key '{key}' not found in path '{path}'");
@@ -118,32 +105,20 @@ public class VaultService : IVaultService
 
     public async Task<Dictionary<string, object>> GetSecretAsync(string path)
     {
-        // Keep existing implementation...
         var cacheKey = $"vault_{path}_all";
-        if (_cache.TryGetValue(cacheKey, out Dictionary<string, object> cachedValue))
-        {
-            return cachedValue;
-        }
+        //if (_cache.TryGetValue(cacheKey, out Dictionary<string, object> cachedValue))
+        //{
+        //    return cachedValue;
+        //}
 
         var secret = await _vaultClient.V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
         if (secret?.Data?.Data != null)
         {
             var secrets = new Dictionary<string, object>(secret.Data.Data);
-            var cacheOptions = new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
-                Priority = CacheItemPriority.High
-            };
-            _cache.Set(cacheKey, secrets, cacheOptions);
+            _cache.Set(cacheKey, secrets, TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes));
             return secrets;
         }
         throw new InvalidOperationException($"No secrets found in path '{path}'");
-    }
-
-    public async Task<string> GetSqlConnectionStringAsync()
-    {
-        // Use dynamic credentials instead of static secrets
-        return await GetDynamicConnectionStringAsync();
     }
 
     private async Task<bool> ValidateConnectionAsync(string connectionString)
@@ -160,3 +135,4 @@ public class VaultService : IVaultService
         }
     }
 }
+

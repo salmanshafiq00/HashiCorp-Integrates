@@ -1,6 +1,4 @@
-﻿using HashiCorpIntegration.Data;
-using HashiCorpIntegration.Vault;
-using Microsoft.Extensions.Options;
+﻿using HashiCorpIntegration.Vault;
 
 namespace HashiCorpIntegration.Jobs;
 
@@ -8,17 +6,14 @@ public class VaultCredentialRefreshService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<VaultCredentialRefreshService> _logger;
-    private readonly VaultSettings _vaultSettings;
-    private readonly TimeSpan _refreshInterval = TimeSpan.FromMinutes(30); // Refresh every 30 minutes
+    private readonly TimeSpan _refreshInterval = TimeSpan.FromMinutes(30);
 
     public VaultCredentialRefreshService(
         IServiceProvider serviceProvider,
-        ILogger<VaultCredentialRefreshService> logger,
-        IOptions<VaultSettings> vaultSettings)
+        ILogger<VaultCredentialRefreshService> logger)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _vaultSettings = vaultSettings.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -28,10 +23,13 @@ public class VaultCredentialRefreshService : BackgroundService
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var connectionStringProvider = scope.ServiceProvider.GetRequiredService<IConnectionStringProvider>();
+                var vaultService = scope.ServiceProvider.GetRequiredService<IVaultService>();
 
-                // This will refresh the cached connection string
-                await connectionStringProvider.GetConnectionStringAsync();
+                // Invalidate cache to force refresh on next request
+                vaultService.InvalidateConnectionCache();
+
+                // Preload new credentials
+                await vaultService.GetSqlConnectionStringAsync();
 
                 _logger.LogInformation("Vault credentials refreshed successfully");
             }
