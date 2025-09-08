@@ -14,6 +14,7 @@ public class VaultService : IVaultService
     private readonly VaultClient _vaultClient;
     private readonly string _connectionCacheKey = "vault_db_connection";
 
+
     public VaultService(
         IOptions<VaultSettings> vaultSettings, 
         ILogger<VaultService> logger, 
