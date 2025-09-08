@@ -14,7 +14,10 @@ public class VaultService : IVaultService
     private readonly VaultClient _vaultClient;
     private readonly string _connectionCacheKey = "vault_db_connection";
 
-    public VaultService(IOptions<VaultSettings> vaultSettings, ILogger<VaultService> logger, IMemoryCache cache)
+    public VaultService(
+        IOptions<VaultSettings> vaultSettings, 
+        ILogger<VaultService> logger, 
+        IMemoryCache cache)
     {
         _vaultSettings = vaultSettings.Value;
         _logger = logger;
@@ -47,9 +50,13 @@ public class VaultService : IVaultService
 
         try
         {
-            var credentials = await _vaultClient.V1.Secrets.Database.GetCredentialsAsync(_vaultSettings.DatabaseRole);
+            var credentials = await _vaultClient.V1.Secrets.Database
+                .GetCredentialsAsync(_vaultSettings.DatabaseRole);
 
             var connectionString = $"Server={_vaultSettings.DatabaseServer};Database={_vaultSettings.DatabaseName};User Id={credentials.Data.Username};Password={credentials.Data.Password};TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30";
+
+            // Clear EF Core connection pools
+            SqlConnection.ClearAllPools();
 
             // Validate connection before caching
             if (!await ValidateConnectionAsync(connectionString))
@@ -68,6 +75,11 @@ public class VaultService : IVaultService
             _logger.LogError(ex, "Failed to retrieve dynamic database credentials from Vault");
             throw;
         }
+    }
+
+    public async Task RenewLeaseAsync(string leaseId, int incrementSeconds = 3600)
+    {
+        await _vaultClient.V1.System.RenewLeaseAsync(leaseId, incrementSeconds);
     }
 
     public void InvalidateConnectionCache()

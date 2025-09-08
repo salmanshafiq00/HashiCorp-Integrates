@@ -16,10 +16,9 @@ builder.Services.AddSingleton<IVaultService, VaultService>();
 builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
 {
     var vaultService = serviceProvider.GetRequiredService<IVaultService>();
-    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     var logger = serviceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
 
-    var connectionString = GetConnectionStringWithRetry(vaultService, configuration, logger);
+    var connectionString = GetConnectionStringWithRetry(vaultService, logger);
 
     // Create a SqlConnection that EF Core will reuse when needed
     var connection = new SqlConnection(connectionString);
@@ -59,7 +58,7 @@ app.MapControllerRoute(
 app.Run();
 
 
-static string GetConnectionStringWithRetry(IVaultService vaultService, IConfiguration configuration, ILogger logger)
+static string GetConnectionStringWithRetry(IVaultService vaultService, ILogger logger)
 {
     try
     {
@@ -77,12 +76,12 @@ static string GetConnectionStringWithRetry(IVaultService vaultService, IConfigur
         catch
         {
             logger.LogError("Failed to get new credentials, falling back to static connection");
-            return configuration.GetConnectionString("DefaultConnection")!;
+             throw;
         }
     }
     catch
     {
         logger.LogError("Failed to get vault credentials, using fallback connection");
-        return configuration.GetConnectionString("DefaultConnection")!;
+        throw;
     }
 }
