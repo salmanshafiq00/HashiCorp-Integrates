@@ -8,9 +8,13 @@ namespace HashiCorpIntegration.Vault;
 
 public class VaultService(
     IOptions<VaultSettings> vaultSettings,
+    IMemoryCache memoryCache,
     ILogger<VaultService> logger) : IVaultService
 {
     private readonly VaultSettings _vaultSettings = vaultSettings.Value;
+    private readonly IMemoryCache _memoryCache = memoryCache;
+    private const string CONNECTION_CACHE_KEY = "vault_connection_string";
+    private const string LEASE_INFO_CACHE_KEY = "vault_lease_info";
     private VaultClient? _vaultClient;
 
     private VaultClient GetVaultClient()
@@ -34,6 +38,14 @@ public class VaultService(
 
     public async Task<string> GetSqlConnectionStringAsync()
     {
+        // Try to get from cache first
+        if (_memoryCache.TryGetValue(CONNECTION_CACHE_KEY, out string? cachedConnectionString) &&
+            !string.IsNullOrEmpty(cachedConnectionString))
+        {
+            logger.LogDebug("Using cached database connection string");
+            return cachedConnectionString;
+        }
+
         try
         {
             var credentials = await GetVaultClient().V1.Secrets.Database
@@ -49,7 +61,29 @@ public class VaultService(
             {
                 throw new InvalidOperationException("Dynamic credentials are valid but database connection failed. Check user permissions.");
             }
-            logger.LogInformation("Retrieved and cached dynamic database credentials");
+
+            // Cache the connection string and lease info
+            var leaseDuration = TimeSpan.FromSeconds(credentials.LeaseDurationSeconds);
+            var cacheExpiry = DateTime.UtcNow.Add(leaseDuration).AddMinutes(-5); // Expire 5 minutes before lease expires
+
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpiration = cacheExpiry,
+                Priority = CacheItemPriority.High
+            };
+
+            _memoryCache.Set(CONNECTION_CACHE_KEY, connectionString, cacheOptions);
+
+            // Store lease info for background service
+            var leaseInfo = new LeaseInfo
+            {
+                LeaseId = credentials.LeaseId,
+                LeaseDuration = leaseDuration,
+                ExpiresAt = cacheExpiry
+            };
+            _memoryCache.Set(LEASE_INFO_CACHE_KEY, leaseInfo, cacheOptions);
+
+            logger.LogInformation("Retrieved and cached dynamic database credentials. Expires at: {ExpiryTime}", cacheExpiry);
             return connectionString;
         }
         catch (Exception ex)
@@ -66,12 +100,27 @@ public class VaultService(
 
     public void InvalidateConnectionCache()
     {
+        _memoryCache.Remove(CONNECTION_CACHE_KEY);
+        _memoryCache.Remove(LEASE_INFO_CACHE_KEY);
         logger.LogInformation("Connection string cache invalidated");
+    }
+
+    public LeaseInfo? GetCurrentLeaseInfo()
+    {
+        _memoryCache.TryGetValue(LEASE_INFO_CACHE_KEY, out LeaseInfo? leaseInfo);
+        return leaseInfo;
     }
 
     public async Task<string> GetSecretAsync(string path, string key)
     {
-        var cacheKey = $"vault_{path}_{key}";
+        var cacheKey = $"vault_secret_{path}_{key}";
+
+        // Try cache first
+        if (_memoryCache.TryGetValue(cacheKey, out string? cachedSecret) &&
+            !string.IsNullOrEmpty(cachedSecret))
+        {
+            return cachedSecret;
+        }
 
         try
         {
@@ -79,6 +128,15 @@ public class VaultService(
             if (secret?.Data?.Data != null && secret.Data.Data.TryGetValue(key, out var value))
             {
                 var secretValue = value.ToString();
+
+                // Cache static secrets for longer (use config setting)
+                var cacheOptions = new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
+                    Priority = CacheItemPriority.Normal
+                };
+
+                _memoryCache.Set(cacheKey, secretValue, cacheOptions);
                 return secretValue;
             }
             throw new KeyNotFoundException($"Secret key '{key}' not found in path '{path}'");
@@ -116,3 +174,9 @@ public class VaultService(
     }
 }
 
+public class LeaseInfo
+{
+    public string LeaseId { get; set; } = string.Empty;
+    public TimeSpan LeaseDuration { get; set; }
+    public DateTime ExpiresAt { get; set; }
+}
