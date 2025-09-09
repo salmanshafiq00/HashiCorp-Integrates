@@ -12,7 +12,6 @@ public class VaultService(
 {
     private readonly VaultSettings _vaultSettings = vaultSettings.Value;
     private VaultClient? _vaultClient;
-    private readonly string _connectionCacheKey = "vault_db_connection";
 
     private VaultClient GetVaultClient()
     {

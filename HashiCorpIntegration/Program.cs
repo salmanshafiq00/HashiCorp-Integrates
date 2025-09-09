@@ -86,7 +86,7 @@ static string GetConnectionStringWithRetry(IVaultService vaultService, ILogger l
         catch
         {
             logger.LogError("Failed to get new credentials, falling back to static connection");
-             throw;
+            throw;
         }
     }
     catch
