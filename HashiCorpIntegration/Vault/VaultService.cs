@@ -1,4 +1,5 @@
-﻿using Microsoft.Data.SqlClient;
+﻿using HashiCorpIntegration.Models;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using VaultSharp;
@@ -13,9 +14,16 @@ public class VaultService(
 {
     private readonly VaultSettings _vaultSettings = vaultSettings.Value;
     private readonly IMemoryCache _memoryCache = memoryCache;
+
+    // Dynamic credential cache keys
     private const string CONNECTION_CACHE_KEY = "vault_connection_string";
     private const string LEASE_INFO_CACHE_KEY = "vault_lease_info";
     private const string ALL_LEASES_CACHE_KEY = "vault_all_leases";
+
+    // Static credential cache keys
+    private const string STATIC_CONNECTION_CACHE_KEY = "vault_static_connection_string";
+    private const string STATIC_CREDENTIAL_INFO_CACHE_KEY = "vault_static_credential_info";
+
     private VaultClient? _vaultClient;
 
     private VaultClient GetVaultClient()
@@ -37,13 +45,20 @@ public class VaultService(
         return _vaultClient;
     }
 
+    #region Dynamic Credentials (existing methods)
+
     public async Task<string> GetSqlConnectionStringAsync()
     {
+        if (_vaultSettings.UseStaticCredentials)
+        {
+            return await GetStaticConnectionStringAsync();
+        }
+
         // Try to get from cache first
         if (_memoryCache.TryGetValue(CONNECTION_CACHE_KEY, out string? cachedConnectionString) &&
             !string.IsNullOrEmpty(cachedConnectionString))
         {
-            logger.LogDebug("Using cached database connection string");
+            logger.LogDebug("Using cached dynamic database connection string");
             return cachedConnectionString;
         }
 
@@ -59,16 +74,13 @@ public class VaultService(
 
             var connectionString = $"Server={_vaultSettings.DatabaseServer};Database={_vaultSettings.DatabaseName};User Id={credentials.Data.Username};Password={credentials.Data.Password};TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30";
 
-            // Clear EF Core connection pools
             SqlConnection.ClearAllPools();
 
-            // Validate connection before caching
             if (!await ValidateConnectionAsync(connectionString))
             {
                 throw new InvalidOperationException("Dynamic credentials are valid but database connection failed. Check user permissions.");
             }
 
-            // Cache the connection string and lease info
             var leaseDuration = TimeSpan.FromSeconds(credentials.LeaseDurationSeconds);
             var cacheExpiry = DateTime.UtcNow.Add(leaseDuration).AddMinutes(-5);
 
@@ -80,7 +92,6 @@ public class VaultService(
 
             _memoryCache.Set(CONNECTION_CACHE_KEY, connectionString, cacheOptions);
 
-            // Store lease info for background service
             var leaseInfo = new LeaseInfo
             {
                 LeaseId = credentials.LeaseId,
@@ -92,10 +103,9 @@ public class VaultService(
             };
             _memoryCache.Set(LEASE_INFO_CACHE_KEY, leaseInfo, cacheOptions);
 
-            // Update all leases cache
             await UpdateAllLeasesCache(leaseInfo);
 
-            logger.LogInformation("Retrieved new database credentials. Username: {Username}, Expires at: {ExpiryTime}",
+            logger.LogInformation("Retrieved new dynamic database credentials. Username: {Username}, Expires at: {ExpiryTime}",
                 credentials.Data.Username, cacheExpiry);
             return connectionString;
         }
@@ -118,14 +128,12 @@ public class VaultService(
         {
             await GetVaultClient().V1.System.RevokeLeaseAsync(leaseId);
 
-            // If this is the current lease, invalidate cache
             var currentLease = GetCurrentLeaseInfo();
             if (currentLease?.LeaseId == leaseId)
             {
                 InvalidateConnectionCache();
             }
 
-            // Remove from all leases cache
             var allLeases = await GetAllActiveLeasesAsync();
             allLeases.RemoveAll(l => l.LeaseId == leaseId);
             _memoryCache.Set(ALL_LEASES_CACHE_KEY, allLeases, TimeSpan.FromMinutes(5));
@@ -143,7 +151,6 @@ public class VaultService(
     {
         try
         {
-            // Get all leases and revoke them
             var allLeases = await GetAllActiveLeasesAsync();
 
             foreach (var lease in allLeases.ToList())
@@ -158,7 +165,6 @@ public class VaultService(
                 }
             }
 
-            // Clear all caches
             InvalidateConnectionCache();
             _memoryCache.Remove(ALL_LEASES_CACHE_KEY);
 
@@ -173,11 +179,9 @@ public class VaultService(
 
     public async Task<List<LeaseInfo>> GetAllActiveLeasesAsync()
     {
-        // Try cache first
         if (_memoryCache.TryGetValue(ALL_LEASES_CACHE_KEY, out List<LeaseInfo>? cachedLeases) &&
             cachedLeases != null)
         {
-            // Update current lease status
             var currentLease = GetCurrentLeaseInfo();
             foreach (var lease in cachedLeases)
             {
@@ -187,8 +191,6 @@ public class VaultService(
             return cachedLeases.Where(l => !l.IsExpired).ToList();
         }
 
-        // For demo purposes, we'll maintain a simple list
-        // In production, you might query Vault's sys/leases endpoint if available
         var leases = new List<LeaseInfo>();
         var currentLeaseInfo = GetCurrentLeaseInfo();
 
@@ -205,13 +207,11 @@ public class VaultService(
     {
         var allLeases = await GetAllActiveLeasesAsync();
 
-        // Mark all other leases as not currently used
         foreach (var lease in allLeases)
         {
             lease.IsCurrentlyUsed = false;
         }
 
-        // Add or update the new lease
         var existingLease = allLeases.FirstOrDefault(l => l.LeaseId == newLease.LeaseId);
         if (existingLease != null)
         {
@@ -219,8 +219,6 @@ public class VaultService(
         }
 
         allLeases.Add(newLease);
-
-        // Remove expired leases
         allLeases.RemoveAll(l => l.IsExpired);
 
         _memoryCache.Set(ALL_LEASES_CACHE_KEY, allLeases, TimeSpan.FromMinutes(5));
@@ -230,7 +228,7 @@ public class VaultService(
     {
         _memoryCache.Remove(CONNECTION_CACHE_KEY);
         _memoryCache.Remove(LEASE_INFO_CACHE_KEY);
-        logger.LogInformation("Connection string cache invalidated");
+        logger.LogInformation("Dynamic connection cache invalidated");
     }
 
     public LeaseInfo? GetCurrentLeaseInfo()
@@ -238,6 +236,141 @@ public class VaultService(
         _memoryCache.TryGetValue(LEASE_INFO_CACHE_KEY, out LeaseInfo? leaseInfo);
         return leaseInfo;
     }
+
+    #endregion
+
+    #region Static Credentials (new methods)
+
+    public async Task<string> GetStaticConnectionStringAsync()
+    {
+        if (_memoryCache.TryGetValue(STATIC_CONNECTION_CACHE_KEY, out string? cachedConnectionString) &&
+            !string.IsNullOrEmpty(cachedConnectionString))
+        {
+            logger.LogDebug("Using cached static database connection string");
+            return cachedConnectionString;
+        }
+
+        return await GetNewStaticConnectionStringAsync();
+    }
+
+    private async Task<string> GetNewStaticConnectionStringAsync()
+    {
+        try
+        {
+            var credentials = await GetVaultClient().V1.Secrets.Database
+                .GetStaticCredentialsAsync(_vaultSettings.StaticDatabaseRole);
+
+            var connectionString = $"Server={_vaultSettings.DatabaseServer};Database={_vaultSettings.DatabaseName};User Id={credentials.Data.Username};Password={credentials.Data.Password};TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30";
+
+            SqlConnection.ClearAllPools();
+
+            if (!await ValidateConnectionAsync(connectionString))
+            {
+                throw new InvalidOperationException("Static credentials are valid but database connection failed. Check user permissions.");
+            }
+
+            // For static credentials, we cache for a shorter period and rely on rotation
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
+                Priority = CacheItemPriority.High
+            };
+
+            _memoryCache.Set(STATIC_CONNECTION_CACHE_KEY, connectionString, cacheOptions);
+
+            // Store static credential info
+            DateTime lastRotated;
+
+            if (!DateTime.TryParse(credentials.Data.LastVaultRotation, out lastRotated))
+            {
+                logger.LogWarning("Failed to parse LastVaultRotation '{Rotation}' from Vault. Using current UTC time as fallback.", credentials.Data.LastVaultRotation);
+                lastRotated = DateTime.UtcNow;
+            }
+            double rotationPeriod;
+            if (!double.TryParse(credentials.Data.RotationPeriod, out rotationPeriod) || rotationPeriod <= 0)
+            {
+                logger.LogWarning("Invalid RotationPeriod '{RotationPeriod}' from Vault. Using default of 24 hours.", credentials.Data.RotationPeriod);
+                rotationPeriod = 86400; // Default to 24 hours
+            }
+            var staticInfo = new StaticCredentialInfo
+            {
+                Username = credentials.Data.Username,
+                Password = credentials.Data.Password,
+                LastRotated = lastRotated,
+                RotationPeriod = TimeSpan.FromSeconds(rotationPeriod),
+                RetrievedAt = DateTime.UtcNow
+            };
+            staticInfo.NextRotation = staticInfo.LastRotated.Add(staticInfo.RotationPeriod);
+
+
+            _memoryCache.Set(STATIC_CREDENTIAL_INFO_CACHE_KEY, staticInfo, cacheOptions);
+
+            logger.LogInformation("Retrieved static database credentials. Username: {Username}, Next rotation: {NextRotation}",
+                credentials.Data.Username, staticInfo.NextRotation);
+            return connectionString;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to retrieve static database credentials from Vault");
+            throw;
+        }
+    }
+
+    public async Task<StaticCredentialInfo?> GetStaticCredentialInfoAsync()
+    {
+        if (_memoryCache.TryGetValue(STATIC_CREDENTIAL_INFO_CACHE_KEY, out StaticCredentialInfo? cachedInfo) &&
+            cachedInfo != null)
+        {
+            return cachedInfo;
+        }
+
+        // If not cached, retrieve fresh credentials
+        await GetNewStaticConnectionStringAsync();
+        _memoryCache.TryGetValue(STATIC_CREDENTIAL_INFO_CACHE_KEY, out cachedInfo);
+        return cachedInfo;
+    }
+
+    public async Task<RotationInfo> RotateStaticCredentialsAsync()
+    {
+        var rotationInfo = new RotationInfo
+        {
+            RotatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await GetVaultClient().V1.Secrets.Database.RotateStaticCredentialsAsync(_vaultSettings.StaticDatabaseRole);
+
+            // Clear cache to force fresh credentials on next request
+            InvalidateStaticConnectionCache();
+
+            // Get fresh credentials to update info
+            var staticInfo = await GetStaticCredentialInfoAsync();
+            rotationInfo.Username = staticInfo?.Username ?? "Unknown";
+            rotationInfo.Success = true;
+
+            logger.LogInformation("Successfully rotated static credentials for role: {Role}", _vaultSettings.StaticDatabaseRole);
+        }
+        catch (Exception ex)
+        {
+            rotationInfo.Success = false;
+            rotationInfo.Error = ex.Message;
+            logger.LogError(ex, "Failed to rotate static credentials for role: {Role}", _vaultSettings.StaticDatabaseRole);
+        }
+
+        return rotationInfo;
+    }
+
+    public void InvalidateStaticConnectionCache()
+    {
+        _memoryCache.Remove(STATIC_CONNECTION_CACHE_KEY);
+        _memoryCache.Remove(STATIC_CREDENTIAL_INFO_CACHE_KEY);
+        logger.LogInformation("Static connection cache invalidated");
+    }
+
+    #endregion
+
+    #region Common Methods
 
     public async Task<string> GetSecretAsync(string path, string key)
     {
@@ -279,8 +412,7 @@ public class VaultService(
         var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
         if (secret?.Data?.Data != null)
         {
-            var secrets = new Dictionary<string, object>(secret.Data.Data);
-            return secrets;
+            return new Dictionary<string, object>(secret.Data.Data);
         }
         throw new InvalidOperationException($"No secrets found in path '{path}'");
     }
@@ -298,4 +430,6 @@ public class VaultService(
             return false;
         }
     }
+
+    #endregion
 }
