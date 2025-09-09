@@ -16,17 +16,26 @@ builder.Services.AddSingleton<IVaultService, VaultService>();
 builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
 {
     var vaultService = serviceProvider.GetRequiredService<IVaultService>();
-    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     var logger = serviceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
+    var connectionString = GetConnectionStringWithRetry(vaultService, logger);
+    options.UseSqlServer(connectionString, sqlOptions =>
+    {
+        // Add connection resiliency
+        sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorNumbersToAdd: [18456]); // Login failed error
 
-    var connectionString = GetConnectionStringWithRetry(vaultService, configuration, logger);
+        // Set command timeout for long operations
+        sqlOptions.CommandTimeout(300); // 5 minutes for bulk operations
+    });
 
-    // Create a SqlConnection that EF Core will reuse when needed
-    var connection = new SqlConnection(connectionString);
-
-    options.UseSqlServer(connection);
+    // Enable sensitive data logging in development
+    if (serviceProvider.GetService<IWebHostEnvironment>()?.IsDevelopment() == true)
+    {
+        options.EnableSensitiveDataLogging();
+    }
 });
-
 
 // Register the interface
 builder.Services.AddScoped<IApplicationDbContext>(provider =>
@@ -59,7 +68,7 @@ app.MapControllerRoute(
 app.Run();
 
 
-static string GetConnectionStringWithRetry(IVaultService vaultService, IConfiguration configuration, ILogger logger)
+static string GetConnectionStringWithRetry(IVaultService vaultService, ILogger logger)
 {
     try
     {
@@ -77,12 +86,12 @@ static string GetConnectionStringWithRetry(IVaultService vaultService, IConfigur
         catch
         {
             logger.LogError("Failed to get new credentials, falling back to static connection");
-            return configuration.GetConnectionString("DefaultConnection")!;
+            throw;
         }
     }
     catch
     {
         logger.LogError("Failed to get vault credentials, using fallback connection");
-        return configuration.GetConnectionString("DefaultConnection")!;
+        throw;
     }
 }

@@ -8,13 +8,19 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
     {
     }
+
     public DbSet<Product> Products { get; set; } = default!;
     public DbSet<Category> Categories { get; set; } = default!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        ConfigureCategory(modelBuilder);
+        ConfigureProduct(modelBuilder);
+    }
 
+    private static void ConfigureCategory(ModelBuilder modelBuilder)
+    {
         // Category configuration
         modelBuilder.Entity<Category>(entity =>
         {
@@ -31,7 +37,10 @@ public class ApplicationDbContext : DbContext, IApplicationDbContext
                 new Category { Id = 5, Name = "Sports & Outdoors" }
             );
         });
+    }
 
+    private static void ConfigureProduct(ModelBuilder modelBuilder)
+    {
         // Product configuration
         modelBuilder.Entity<Product>(entity =>
         {

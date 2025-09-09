@@ -6,50 +6,61 @@ using VaultSharp.V1.AuthMethods.Token;
 
 namespace HashiCorpIntegration.Vault;
 
-public class VaultService : IVaultService
+public class VaultService(
+    IOptions<VaultSettings> vaultSettings,
+    IMemoryCache memoryCache,
+    ILogger<VaultService> logger) : IVaultService
 {
-    private readonly VaultSettings _vaultSettings;
-    private readonly ILogger<VaultService> _logger;
-    private readonly IMemoryCache _cache;
-    private readonly VaultClient _vaultClient;
-    private readonly string _connectionCacheKey = "vault_db_connection";
+    private readonly VaultSettings _vaultSettings = vaultSettings.Value;
+    private readonly IMemoryCache _memoryCache = memoryCache;
+    private const string CONNECTION_CACHE_KEY = "vault_connection_string";
+    private const string LEASE_INFO_CACHE_KEY = "vault_lease_info";
+    private const string ALL_LEASES_CACHE_KEY = "vault_all_leases";
+    private VaultClient? _vaultClient;
 
-    public VaultService(IOptions<VaultSettings> vaultSettings, ILogger<VaultService> logger, IMemoryCache cache)
+    private VaultClient GetVaultClient()
     {
-        _vaultSettings = vaultSettings.Value;
-        _logger = logger;
-        _cache = cache;
-        _vaultClient = CreateVaultClient();
-    }
-
-    private VaultClient CreateVaultClient()
-    {
-        try
+        if (_vaultClient == null)
         {
-            var vaultClientSettings = new VaultClientSettings(_vaultSettings.VaultUrl,
-                new TokenAuthMethodInfo(_vaultSettings.VaultToken));
-            return new VaultClient(vaultClientSettings);
+            try
+            {
+                var vaultClientSettings = new VaultClientSettings(_vaultSettings.VaultUrl,
+                    new TokenAuthMethodInfo(_vaultSettings.VaultToken));
+                _vaultClient = new VaultClient(vaultClientSettings);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to create Vault client");
+                throw;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create Vault client");
-            throw;
-        }
+        return _vaultClient;
     }
 
     public async Task<string> GetSqlConnectionStringAsync()
     {
-        //if (_cache.TryGetValue(_connectionCacheKey, out string cachedConnectionString))
-        //{
-        //    _logger.LogDebug("Retrieved database connection from cache");
-        //    return cachedConnectionString;
-        //}
+        // Try to get from cache first
+        if (_memoryCache.TryGetValue(CONNECTION_CACHE_KEY, out string? cachedConnectionString) &&
+            !string.IsNullOrEmpty(cachedConnectionString))
+        {
+            logger.LogDebug("Using cached database connection string");
+            return cachedConnectionString;
+        }
 
+        return await GetNewSqlConnectionStringAsync();
+    }
+
+    public async Task<string> GetNewSqlConnectionStringAsync()
+    {
         try
         {
-            var credentials = await _vaultClient.V1.Secrets.Database.GetCredentialsAsync(_vaultSettings.DatabaseRole);
+            var credentials = await GetVaultClient().V1.Secrets.Database
+                .GetCredentialsAsync(_vaultSettings.DatabaseRole);
 
             var connectionString = $"Server={_vaultSettings.DatabaseServer};Database={_vaultSettings.DatabaseName};User Id={credentials.Data.Username};Password={credentials.Data.Password};TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30";
+
+            // Clear EF Core connection pools
+            SqlConnection.ClearAllPools();
 
             // Validate connection before caching
             if (!await ValidateConnectionAsync(connectionString))
@@ -57,65 +68,218 @@ public class VaultService : IVaultService
                 throw new InvalidOperationException("Dynamic credentials are valid but database connection failed. Check user permissions.");
             }
 
-            // Cache with shorter expiration than lease duration
-            _cache.Set(_connectionCacheKey, connectionString, TimeSpan.FromMinutes(50));
+            // Cache the connection string and lease info
+            var leaseDuration = TimeSpan.FromSeconds(credentials.LeaseDurationSeconds);
+            var cacheExpiry = DateTime.UtcNow.Add(leaseDuration).AddMinutes(-5);
 
-            _logger.LogInformation("Retrieved and cached dynamic database credentials");
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpiration = cacheExpiry,
+                Priority = CacheItemPriority.High
+            };
+
+            _memoryCache.Set(CONNECTION_CACHE_KEY, connectionString, cacheOptions);
+
+            // Store lease info for background service
+            var leaseInfo = new LeaseInfo
+            {
+                LeaseId = credentials.LeaseId,
+                LeaseDuration = leaseDuration,
+                ExpiresAt = cacheExpiry,
+                CreatedAt = DateTime.UtcNow,
+                Username = credentials.Data.Username,
+                IsCurrentlyUsed = true
+            };
+            _memoryCache.Set(LEASE_INFO_CACHE_KEY, leaseInfo, cacheOptions);
+
+            // Update all leases cache
+            await UpdateAllLeasesCache(leaseInfo);
+
+            logger.LogInformation("Retrieved new database credentials. Username: {Username}, Expires at: {ExpiryTime}",
+                credentials.Data.Username, cacheExpiry);
             return connectionString;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve dynamic database credentials from Vault");
+            logger.LogError(ex, "Failed to retrieve dynamic database credentials from Vault");
             throw;
         }
     }
 
+    public async Task RenewLeaseAsync(string leaseId, int incrementSeconds = 3600)
+    {
+        await GetVaultClient().V1.System.RenewLeaseAsync(leaseId, incrementSeconds);
+        logger.LogInformation("Renewed lease {LeaseId} for {Seconds} seconds", leaseId, incrementSeconds);
+    }
+
+    public async Task RevokeSingleLeaseAsync(string leaseId)
+    {
+        try
+        {
+            await GetVaultClient().V1.System.RevokeLeaseAsync(leaseId);
+
+            // If this is the current lease, invalidate cache
+            var currentLease = GetCurrentLeaseInfo();
+            if (currentLease?.LeaseId == leaseId)
+            {
+                InvalidateConnectionCache();
+            }
+
+            // Remove from all leases cache
+            var allLeases = await GetAllActiveLeasesAsync();
+            allLeases.RemoveAll(l => l.LeaseId == leaseId);
+            _memoryCache.Set(ALL_LEASES_CACHE_KEY, allLeases, TimeSpan.FromMinutes(5));
+
+            logger.LogInformation("Revoked lease {LeaseId}", leaseId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to revoke lease {LeaseId}", leaseId);
+            throw;
+        }
+    }
+
+    public async Task RevokeAllLeasesAsync()
+    {
+        try
+        {
+            // Get all leases and revoke them
+            var allLeases = await GetAllActiveLeasesAsync();
+
+            foreach (var lease in allLeases.ToList())
+            {
+                try
+                {
+                    await RevokeSingleLeaseAsync(lease.LeaseId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to revoke lease {LeaseId}", lease.LeaseId);
+                }
+            }
+
+            // Clear all caches
+            InvalidateConnectionCache();
+            _memoryCache.Remove(ALL_LEASES_CACHE_KEY);
+
+            logger.LogInformation("Attempted to revoke all leases");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to revoke all leases");
+            throw;
+        }
+    }
+
+    public async Task<List<LeaseInfo>> GetAllActiveLeasesAsync()
+    {
+        // Try cache first
+        if (_memoryCache.TryGetValue(ALL_LEASES_CACHE_KEY, out List<LeaseInfo>? cachedLeases) &&
+            cachedLeases != null)
+        {
+            // Update current lease status
+            var currentLease = GetCurrentLeaseInfo();
+            foreach (var lease in cachedLeases)
+            {
+                lease.IsCurrentlyUsed = currentLease?.LeaseId == lease.LeaseId;
+            }
+
+            return cachedLeases.Where(l => !l.IsExpired).ToList();
+        }
+
+        // For demo purposes, we'll maintain a simple list
+        // In production, you might query Vault's sys/leases endpoint if available
+        var leases = new List<LeaseInfo>();
+        var currentLeaseInfo = GetCurrentLeaseInfo();
+
+        if (currentLeaseInfo != null)
+        {
+            leases.Add(currentLeaseInfo);
+        }
+
+        _memoryCache.Set(ALL_LEASES_CACHE_KEY, leases, TimeSpan.FromMinutes(5));
+        return leases;
+    }
+
+    private async Task UpdateAllLeasesCache(LeaseInfo newLease)
+    {
+        var allLeases = await GetAllActiveLeasesAsync();
+
+        // Mark all other leases as not currently used
+        foreach (var lease in allLeases)
+        {
+            lease.IsCurrentlyUsed = false;
+        }
+
+        // Add or update the new lease
+        var existingLease = allLeases.FirstOrDefault(l => l.LeaseId == newLease.LeaseId);
+        if (existingLease != null)
+        {
+            allLeases.Remove(existingLease);
+        }
+
+        allLeases.Add(newLease);
+
+        // Remove expired leases
+        allLeases.RemoveAll(l => l.IsExpired);
+
+        _memoryCache.Set(ALL_LEASES_CACHE_KEY, allLeases, TimeSpan.FromMinutes(5));
+    }
+
     public void InvalidateConnectionCache()
     {
-        _cache.Remove(_connectionCacheKey);
-        _logger.LogInformation("Connection string cache invalidated");
+        _memoryCache.Remove(CONNECTION_CACHE_KEY);
+        _memoryCache.Remove(LEASE_INFO_CACHE_KEY);
+        logger.LogInformation("Connection string cache invalidated");
+    }
+
+    public LeaseInfo? GetCurrentLeaseInfo()
+    {
+        _memoryCache.TryGetValue(LEASE_INFO_CACHE_KEY, out LeaseInfo? leaseInfo);
+        return leaseInfo;
     }
 
     public async Task<string> GetSecretAsync(string path, string key)
     {
-        var cacheKey = $"vault_{path}_{key}";
+        var cacheKey = $"vault_secret_{path}_{key}";
 
-        //if (_cache.TryGetValue(cacheKey, out string cachedValue))
-        //{
-        //    return cachedValue;
-        //}
+        if (_memoryCache.TryGetValue(cacheKey, out string? cachedSecret) &&
+            !string.IsNullOrEmpty(cachedSecret))
+        {
+            return cachedSecret;
+        }
 
         try
         {
-            var secret = await _vaultClient.V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
+            var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
             if (secret?.Data?.Data != null && secret.Data.Data.TryGetValue(key, out var value))
             {
                 var secretValue = value.ToString();
-                _cache.Set(cacheKey, secretValue, TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes));
+
+                var cacheOptions = new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
+                    Priority = CacheItemPriority.Normal
+                };
+
+                _memoryCache.Set(cacheKey, secretValue, cacheOptions);
                 return secretValue;
             }
             throw new KeyNotFoundException($"Secret key '{key}' not found in path '{path}'");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve secret from Vault: {Path}/{Key}", path, key);
+            logger.LogError(ex, "Failed to retrieve secret from Vault: {Path}/{Key}", path, key);
             throw;
         }
     }
 
     public async Task<Dictionary<string, object>> GetSecretAsync(string path)
     {
-        var cacheKey = $"vault_{path}_all";
-        //if (_cache.TryGetValue(cacheKey, out Dictionary<string, object> cachedValue))
-        //{
-        //    return cachedValue;
-        //}
-
-        var secret = await _vaultClient.V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
+        var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
         if (secret?.Data?.Data != null)
         {
             var secrets = new Dictionary<string, object>(secret.Data.Data);
-            _cache.Set(cacheKey, secrets, TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes));
             return secrets;
         }
         throw new InvalidOperationException($"No secrets found in path '{path}'");
@@ -135,4 +299,3 @@ public class VaultService : IVaultService
         }
     }
 }
-
