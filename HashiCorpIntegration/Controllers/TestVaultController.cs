@@ -5,22 +5,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HashiCorpIntegration.Controllers;
 
-public class TestVaultController : Controller
+public class TestVaultController(
+    IVaultService vaultService,
+    IServiceProvider serviceProvider,
+    ILogger<TestVaultController> logger) : Controller
 {
-    private readonly IVaultService _vaultService;
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<TestVaultController> _logger;
-
-    public TestVaultController(
-        IVaultService vaultService,
-        IServiceProvider serviceProvider,
-        ILogger<TestVaultController> logger)
-    {
-        _vaultService = vaultService;
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-    }
-
     public async Task<IActionResult> Index()
     {
         var model = new VaultTestResultViewModel();
@@ -28,30 +17,30 @@ public class TestVaultController : Controller
         // Test Vault connection
         try
         {
-            model.VaultConnectionString = await _vaultService.GetSqlConnectionStringAsync();
+            model.VaultConnectionString = await vaultService.GetSqlConnectionStringAsync();
             model.VaultConnectionSuccess = !string.IsNullOrEmpty(model.VaultConnectionString);
-            _logger.LogInformation("Successfully retrieved connection string from Vault");
+            logger.LogInformation("Successfully retrieved connection string from Vault");
         }
         catch (Exception ex)
         {
             model.VaultConnectionSuccess = false;
             model.VaultError = ex.Message;
-            _logger.LogError(ex, "Vault connection test failed");
+            logger.LogError(ex, "Vault connection test failed");
         }
 
         // Test Database connection using DI container
         try
         {
-            using var scope = _serviceProvider.CreateScope();
+            using var scope = serviceProvider.CreateScope();
             using var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             model.DatabaseConnectionSuccess = await dbContext.Database.CanConnectAsync();
-            _logger.LogInformation("Successfully connected to database using dynamic connection");
+            logger.LogInformation("Successfully connected to database using dynamic connection");
         }
         catch (Exception ex)
         {
             model.DatabaseConnectionSuccess = false;
             model.DatabaseError = ex.Message;
-            _logger.LogError(ex, "Database connection test failed");
+            logger.LogError(ex, "Database connection test failed");
         }
 
         return View(model);
@@ -63,7 +52,7 @@ public class TestVaultController : Controller
 
         try
         {
-            using var scope = _serviceProvider.CreateScope();
+            using var scope = serviceProvider.CreateScope();
             using var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             var categoriesCount = await dbContext.Categories.CountAsync();
@@ -74,14 +63,14 @@ public class TestVaultController : Controller
             model.ProductsCount = productsCount;
             model.QueryExecutionTime = DateTime.Now;
 
-            _logger.LogInformation("Database query test successful - Categories: {CategoriesCount}, Products: {ProductsCount}",
+            logger.LogInformation("Database query test successful - Categories: {CategoriesCount}, Products: {ProductsCount}",
                 categoriesCount, productsCount);
         }
         catch (Exception ex)
         {
             model.Success = false;
             model.Error = ex.Message;
-            _logger.LogError(ex, "Database query test failed");
+            logger.LogError(ex, "Database query test failed");
         }
 
         return View(model);
@@ -93,7 +82,7 @@ public class TestVaultController : Controller
 
         try
         {
-            var connectionString = await _vaultService.GetSqlConnectionStringAsync();
+            var connectionString = await vaultService.GetSqlConnectionStringAsync();
             var parts = connectionString.Split(';');
             var userIdPart = parts.FirstOrDefault(p => p.StartsWith("User Id=", StringComparison.OrdinalIgnoreCase));
 
@@ -105,13 +94,13 @@ public class TestVaultController : Controller
             }
 
             model.RetrievedAt = DateTime.Now;
-            _logger.LogInformation("Retrieved credential info for username: {Username}", model.Username);
+            logger.LogInformation("Retrieved credential info for username: {Username}", model.Username);
         }
         catch (Exception ex)
         {
             model.Success = false;
             model.Error = ex.Message;
-            _logger.LogError(ex, "Failed to retrieve credential info");
+            logger.LogError(ex, "Failed to retrieve credential info");
         }
 
         return View(model);
@@ -129,7 +118,7 @@ public class TestVaultController : Controller
 
         try
         {
-            await _vaultService.GetSqlConnectionStringAsync();
+            await vaultService.GetSqlConnectionStringAsync();
             health = health with { vault = health.vault with { healthy = true } };
         }
         catch (Exception ex)
@@ -139,7 +128,7 @@ public class TestVaultController : Controller
 
         try
         {
-            using var scope = _serviceProvider.CreateScope();
+            using var scope = serviceProvider.CreateScope();
             using var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             await dbContext.Database.CanConnectAsync();
             health = health with { database = health.database with { healthy = true } };
