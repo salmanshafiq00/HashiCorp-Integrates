@@ -7,11 +7,11 @@ public class VaultDashboardViewModel
 
     // Dynamic credential properties
     public CurrentLeaseViewModel? CurrentLease { get; set; }
-    public List<LeaseViewModel> AllLeases { get; set; } = new();
+    public List<LeaseViewModel> AllLeases { get; set; } = [];
 
     // Static credential properties
     public StaticCredentialViewModel? StaticCredential { get; set; }
-    public List<RotationHistoryViewModel> RotationHistory { get; set; } = new();
+    public List<RotationHistoryViewModel> RotationHistory { get; set; } = [];
 
     // Database connection properties
     public bool DatabaseConnectionSuccess { get; set; }

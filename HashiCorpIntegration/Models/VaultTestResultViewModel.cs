@@ -1,6 +1,5 @@
 ﻿namespace HashiCorpIntegration.Models;
 
-// Keep existing ViewModels for compatibility
 public class VaultTestResultViewModel
 {
     public bool VaultConnectionSuccess { get; set; }

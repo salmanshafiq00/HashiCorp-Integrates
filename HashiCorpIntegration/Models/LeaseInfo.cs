@@ -1,4 +1,4 @@
-﻿namespace HashiCorpIntegration.Vault;
+﻿namespace HashiCorpIntegration.Models;
 
 public class LeaseInfo
 {
