@@ -1,253 +1,389 @@
-@using System.Text.Json
-@model HashiCorpIntegration.Controllers.VaultTestResultViewModel
+@using HashiCorpIntegration.Models
+
+@model VaultDashboardViewModel
 @{
-    ViewData["Title"] = "Vault Integration Test";
+    ViewData["Title"] = "Vault Dashboard";
 }
 
-<div class="container mt-4">
-    <div class="row">
-        <div class="col-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2 class="mb-0">
-                    <i class="fas fa-shield-alt me-2"></i>
-                    Vault Integration Test
-                </h2>
-                <button class="btn btn-outline-primary" onclick="location.reload()">
-                    <i class="fas fa-sync-alt me-1"></i>
-                    Refresh Test
-                </button>
-            </div>
+<div class="container-fluid mt-4">
+    <h2 class="mb-4">
+        <i class="fas fa-vault"></i> Vault Dashboard
+    </h2>
+
+    <!-- Alert Messages -->
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="fas fa-check-circle"></i> @TempData["Success"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
-    </div>
+    }
+
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-circle"></i> @TempData["Error"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <div class="alert alert-warning" role="alert">
+            <i class="fas fa-exclamation-triangle"></i> @Model.Error
+        </div>
+    }
 
     <div class="row">
-        <!-- Vault Connection Card -->
-        <div class="col-md-6 mb-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-header bg-primary text-white d-flex align-items-center">
-                    <i class="fas fa-vault me-2"></i>
-                    <h5 class="mb-0">Vault Connection</h5>
+        <!-- Current Active Lease Card -->
+        <div class="col-lg-6 mb-4">
+            <div class="card border-primary">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-key"></i> Current Active Lease
+                    </h5>
                 </div>
                 <div class="card-body">
-                    @if (Model.VaultConnectionSuccess)
+                    @if (Model.CurrentLease != null)
                     {
-                        <div class="alert alert-success d-flex align-items-center" role="alert">
-                            <i class="fas fa-check-circle me-2"></i>
-                            <div>
-                                <strong>Connection Successful!</strong>
-                                <br>
-                                <small class="text-muted">Dynamic credentials retrieved from Vault</small>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <strong>Lease ID:</strong><br>
+                                <code class="text-primary">@Model.CurrentLease.LeaseId</code>
+                            </div>
+                            <div class="col-sm-6">
+                                <strong>Username:</strong><br>
+                                <span class="badge bg-info">@Model.CurrentLease.Username</span>
+                            </div>
+                        </div>
+
+                        <hr>
+
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <strong>Created:</strong><br>
+                                @Model.CurrentLease.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                            </div>
+                            <div class="col-sm-6">
+                                <strong>Expires:</strong><br>
+                                @Model.CurrentLease.ExpiresAt.ToString("yyyy-MM-dd HH:mm:ss")
                             </div>
                         </div>
 
                         <div class="mt-3">
-                            <h6 class="text-muted mb-2">Connection Details:</h6>
-                            <div class="bg-light p-3 rounded">
-                                <small class="font-monospace text-break">@Model.VaultConnectionString</small>
-                            </div>
-                            <div class="mt-2">
-                                <small class="text-muted">
-                                    <i class="fas fa-clock me-1"></i>
-                                    Credentials cached for 50 minutes
-                                </small>
-                            </div>
+                            @if (!Model.CurrentLease.IsExpired)
+                            {
+                                <div class="alert alert-success">
+                                    <i class="fas fa-clock"></i>
+                                    <strong>Time Remaining:</strong>
+                                    @($"{Model.CurrentLease.TimeRemaining.Hours}h {Model.CurrentLease.TimeRemaining.Minutes}m {Model.CurrentLease.TimeRemaining.Seconds}s")
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="alert alert-danger">
+                                    <i class="fas fa-exclamation-circle"></i>
+                                    <strong>EXPIRED</strong>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="btn-group w-100" role="group">
+                            <form asp-action="RenewLease" method="post" class="d-inline">
+                                <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
+                                <input type="hidden" name="incrementSeconds" value="3600" />
+                                <button type="submit" class="btn btn-success btn-sm"
+                                @(Model.CurrentLease.IsExpired ? "disabled" : "")>
+                                    <i class="fas fa-refresh"></i> Renew (1h)
+                                </button>
+                            </form>
+                            <form asp-action="RevokeLease" method="post" class="d-inline"
+                                  onsubmit="return confirm('Are you sure you want to revoke the current lease?')">
+                                <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
+                                <button type="submit" class="btn btn-danger btn-sm">
+                                    <i class="fas fa-times"></i> Revoke
+                                </button>
+                            </form>
                         </div>
                     }
                     else
                     {
-                        <div class="alert alert-danger d-flex align-items-center" role="alert">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            <div>
-                                <strong>Connection Failed!</strong>
-                                <br>
-                                <small>@Model.VaultError</small>
-                            </div>
-                        </div>
-
-                        <div class="mt-3">
-                            <h6 class="text-muted mb-2">Troubleshooting:</h6>
-                            <ul class="list-unstyled small">
-                                <li><i class="fas fa-arrow-right me-1"></i> Check Vault server is running</li>
-                                <li><i class="fas fa-arrow-right me-1"></i> Verify token authentication</li>
-                                <li><i class="fas fa-arrow-right me-1"></i> Confirm database role configuration</li>
-                            </ul>
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-exclamation-circle fa-2x"></i>
+                            <p class="mt-2">No active lease found</p>
+                            <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-plus"></i> Get New Connection
+                                </button>
+                            </form>
                         </div>
                     }
-                </div>
-                <div class="card-footer bg-light">
-                    <div class="row text-center">
-                        <div class="col">
-                            <div class="badge @(Model.VaultConnectionSuccess ? "bg-success" : "bg-danger")">
-                                @(Model.VaultConnectionSuccess ? "HEALTHY" : "ERROR")
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Database Connection Card -->
-        <div class="col-md-6 mb-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-header bg-info text-white d-flex align-items-center">
-                    <i class="fas fa-database me-2"></i>
-                    <h5 class="mb-0">Database Connection</h5>
+        <!-- Database Connection Status -->
+        <div class="col-lg-6 mb-4">
+            <div class="card border-success">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-database"></i> Database Status
+                    </h5>
                 </div>
                 <div class="card-body">
                     @if (Model.DatabaseConnectionSuccess)
                     {
-                        <div class="alert alert-success d-flex align-items-center" role="alert">
-                            <i class="fas fa-check-circle me-2"></i>
-                            <div>
-                                <strong>Connection Successful!</strong>
-                                <br>
-                                <small class="text-muted">Database is accessible and ready</small>
-                            </div>
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i>
+                            <strong>Connected Successfully</strong>
                         </div>
 
-                        <div class="mt-3">
-                            <h6 class="text-muted mb-2">Connection Status:</h6>
-                            <div class="d-flex justify-content-between">
-                                <span><i class="fas fa-server me-1"></i> Server:</span>
-                                <span class="font-monospace">SQL Server</span>
+                        <div class="row">
+                            <div class="col-6 text-center">
+                                <h4 class="text-primary">@Model.CategoriesCount</h4>
+                                <small class="text-muted">Categories</small>
                             </div>
-                            <div class="d-flex justify-content-between">
-                                <span><i class="fas fa-plug me-1"></i> Status:</span>
-                                <span class="text-success">Connected</span>
+                            <div class="col-6 text-center">
+                                <h4 class="text-primary">@Model.ProductsCount</h4>
+                                <small class="text-muted">Products</small>
                             </div>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(Model.DatabaseError))
+                    {
+                        <div class="alert alert-danger">
+                            <i class="fas fa-times-circle"></i>
+                            <strong>Connection Failed</strong>
+                        </div>
+                        <small class="text-muted">@Model.DatabaseError</small>
+                    }
+                    else if (Model.CurrentLease == null)
+                    {
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-info-circle fa-2x"></i>
+                            <p class="mt-2">No active lease to test connection</p>
                         </div>
                     }
                     else
                     {
-                        <div class="alert alert-danger d-flex align-items-center" role="alert">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            <div>
-                                <strong>Connection Failed!</strong>
-                                <br>
-                                <small>@Model.DatabaseError</small>
-                            </div>
-                        </div>
-
-                        <div class="mt-3">
-                            <h6 class="text-muted mb-2">Possible Issues:</h6>
-                            <ul class="list-unstyled small">
-                                <li><i class="fas fa-arrow-right me-1"></i> Database credentials expired</li>
-                                <li><i class="fas fa-arrow-right me-1"></i> Network connectivity issues</li>
-                                <li><i class="fas fa-arrow-right me-1"></i> Database permissions insufficient</li>
-                            </ul>
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-question-circle fa-2x"></i>
+                            <p class="mt-2">Connection status unknown</p>
                         </div>
                     }
-                </div>
-                <div class="card-footer bg-light">
-                    <div class="row text-center">
-                        <div class="col">
-                            <div class="badge @(Model.DatabaseConnectionSuccess ? "bg-success" : "bg-danger")">
-                                @(Model.DatabaseConnectionSuccess ? "CONNECTED" : "DISCONNECTED")
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Overall Status Row -->
+    <!-- Actions Row -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-cogs"></i> Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="btn-group" role="group">
+                        <form asp-action="GetNewConnection" method="post" class="d-inline">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Get New Connection
+                            </button>
+                        </form>
+
+                        <a href="@Url.Action("TestQuery")" class="btn btn-info">
+                            <i class="fas fa-play"></i> Test Query
+                        </a>
+
+                        <a href="@Url.Action("CredentialInfo")" class="btn btn-secondary">
+                            <i class="fas fa-info"></i> Credential Details
+                        </a>
+
+                        <a href="@Url.Action("HealthCheck")" class="btn btn-success" target="_blank">
+                            <i class="fas fa-heartbeat"></i> Health Check (JSON)
+                        </a>
+                    </div>
+
+                    @if (Model.AllLeases.Any())
+                    {
+                        <div class="mt-3">
+                            <form asp-action="RevokeAllLeases" method="post" class="d-inline"
+                                  onsubmit="return confirm('Are you sure you want to revoke ALL leases? This will invalidate all active connections.')">
+                                <button type="submit" class="btn btn-danger">
+                                    <i class="fas fa-trash-alt"></i> Revoke All Leases
+                                </button>
+                            </form>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Leases Table -->
     <div class="row">
         <div class="col-12">
-            <div class="card border-0">
-                <div class="card-body text-center py-4">
-                    @if (Model.VaultConnectionSuccess && Model.DatabaseConnectionSuccess)
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-list"></i> All Active Leases (@Model.AllLeases.Count)
+                    </h5>
+                </div>
+                <div class="card-body">
+                    @if (Model.AllLeases.Any())
                     {
-                        <div class="text-success mb-3">
-                            <i class="fas fa-check-circle" style="font-size: 3rem;"></i>
-                        </div>
-                        <h4 class="text-success mb-2">System Integration Successful</h4>
-                        <p class="text-muted">Both Vault and Database connections are working properly. Your application is ready to use dynamic database credentials.</p>
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Status</th>
+                                        <th>Lease ID</th>
+                                        <th>Username</th>
+                                        <th>Created</th>
+                                        <th>Expires</th>
+                                        <th>Time Remaining</th>
+                                        <th>Duration</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var lease in Model.AllLeases.OrderByDescending(l => l.IsCurrentlyUsed).ThenBy(l => l.ExpiresAt))
+                                    {
+                                        <tr class="@(lease.IsCurrentlyUsed ? "table-primary" : "") @(lease.IsExpired ? "table-danger" : "")">
+                                            <td>
+                                                @if (lease.IsCurrentlyUsed)
+                                                {
+                                                    <span class="badge bg-primary">
+                                                        <i class="fas fa-star"></i> CURRENT
+                                                    </span>
+                                                }
+                                                else if (lease.IsExpired)
+                                                {
+                                                    <span class="badge bg-danger">
+                                                        <i class="fas fa-times"></i> EXPIRED
+                                                    </span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-check"></i> ACTIVE
+                                                    </span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <code class="small">@lease.LeaseId</code>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-info">@lease.Username</span>
+                                            </td>
+                                            <td class="small">
+                                                @lease.CreatedAt.ToString("MM/dd HH:mm:ss")
+                                            </td>
+                                            <td class="small">
+                                                @lease.ExpiresAt.ToString("MM/dd HH:mm:ss")
+                                            </td>
+                                            <td class="small">
+                                                @if (!lease.IsExpired)
+                                                {
+                                                    <span class="text-success">
+                                                        @($"{lease.TimeRemaining.Hours:D2}:{lease.TimeRemaining.Minutes:D2}:{lease.TimeRemaining.Seconds:D2}")
+                                                    </span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-danger">EXPIRED</span>
+                                                }
+                                            </td>
+                                            <td class="small">
+                                                @($"{lease.LeaseDuration.TotalMinutes:F0}m")
+                                            </td>
+                                            <td>
+                                                <div class="btn-group btn-group-sm" role="group">
+                                                    <form asp-action="RenewLease" method="post" class="d-inline">
+                                                        <input type="hidden" name="leaseId" value="@lease.LeaseId" />
+                                                        <input type="hidden" name="incrementSeconds" value="3600" />
+                                                        <button type="submit" class="btn btn-outline-success btn-sm"
+                                                        @(lease.IsExpired ? "disabled" : "")
+                                                                title="Renew for 1 hour">
+                                                            <i class="fas fa-refresh"></i>
+                                                        </button>
+                                                    </form>
 
-                        <div class="mt-4">
-                            <a href="@Url.Action("TestQuery", "TestVault")" class="btn btn-success me-2">
-                                <i class="fas fa-play me-1"></i>
-                                Test Database Query
-                            </a>
-                            <a href="@Url.Action("CredentialInfo", "TestVault")" class="btn btn-outline-info">
-                                <i class="fas fa-info-circle me-1"></i>
-                                View Credential Details
-                            </a>
+                                                    <form asp-action="RevokeLease" method="post" class="d-inline"
+                                                          onsubmit="return confirm('Are you sure you want to revoke this lease?')">
+                                                        <input type="hidden" name="leaseId" value="@lease.LeaseId" />
+                                                        <button type="submit" class="btn btn-outline-danger btn-sm"
+                                                                title="Revoke lease">
+                                                            <i class="fas fa-times"></i>
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
                         </div>
                     }
                     else
                     {
-                        <div class="text-warning mb-3">
-                            <i class="fas fa-exclamation-triangle" style="font-size: 3rem;"></i>
-                        </div>
-                        <h4 class="text-warning mb-2">Partial System Failure</h4>
-                        <p class="text-muted">Some components are not working properly. Please check the individual connection status above.</p>
-
-                        <div class="mt-4">
-                            <button class="btn btn-warning" onclick="location.reload()">
-                                <i class="fas fa-redo me-1"></i>
-                                Retry Connection Test
-                            </button>
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-inbox fa-3x"></i>
+                            <p class="mt-3 mb-4">No active leases found</p>
+                            <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-plus"></i> Create First Lease
+                                </button>
+                            </form>
                         </div>
                     }
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Debug Information (only in development) -->
-    @if (ViewContext.HttpContext.Request.Query.ContainsKey("debug"))
-    {
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card border-warning">
-                    <div class="card-header bg-warning text-dark">
-                        <i class="fas fa-bug me-2"></i>
-                        Debug Information
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h6>Vault Status:</h6>
-                                <pre class="bg-light p-2 small">@Html.Raw(JsonSerializer.Serialize(new
-                                        {
-                                            Success = Model.VaultConnectionSuccess,
-                                            Error = Model.VaultError,
-                                            ConnectionString = Model.VaultConnectionString?.Substring(0, Math.Min(50, Model.VaultConnectionString?.Length ?? 0)) + "..."
-                                        }, new JsonSerializerOptions { WriteIndented = true }))</pre>
-                            </div>
-                            <div class="col-md-6">
-                                <h6>Database Status:</h6>
-                                <pre class="bg-light p-2 small">@Html.Raw(JsonSerializer.Serialize(new
-                                        {
-                                            Success = Model.DatabaseConnectionSuccess,
-                                            Error = Model.DatabaseError
-                                        }, new JsonSerializerOptions { WriteIndented = true }))</pre>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    }
 </div>
 
-<!-- Add Font Awesome for icons -->
-@section Scripts {
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<!-- Auto-refresh script -->
+<script>
+    // Auto-refresh every 30 seconds to update time remaining
+    let refreshInterval;
 
-    <script>
-        // Auto-refresh every 5 minutes to check connection status
-        setTimeout(function() {
-            if (confirm('Connection status may have changed. Refresh to check latest status?')) {
-                location.reload();
-            }
-        }, 300000); // 5 minutes
+    function startAutoRefresh() {
+        refreshInterval = setInterval(() => {
+            // Only refresh if there are active leases
+    @if (Model.AllLeases.Any(l => !l.IsExpired))
+    {
+        <text>
+                    location.reload();
+        </text>
+    }
+        }, 30000); // 30 seconds
+    }
 
-        // Add loading spinner on refresh button click
-        document.querySelector('button[onclick="location.reload()"]').addEventListener('click', function() {
-            this.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
-            this.disabled = true;
-        });
-    </script>
-}
+    function stopAutoRefresh() {
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+        }
+    }
+
+    // Start auto-refresh when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        startAutoRefresh();
+    });
+
+    // Stop auto-refresh when page is hidden
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            stopAutoRefresh();
+        } else {
+            startAutoRefresh();
+        }
+    });
+</script>
+
+<!-- Bootstrap 5 and FontAwesome for icons -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>

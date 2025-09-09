@@ -15,6 +15,7 @@ public class VaultService(
     private readonly IMemoryCache _memoryCache = memoryCache;
     private const string CONNECTION_CACHE_KEY = "vault_connection_string";
     private const string LEASE_INFO_CACHE_KEY = "vault_lease_info";
+    private const string ALL_LEASES_CACHE_KEY = "vault_all_leases";
     private VaultClient? _vaultClient;
 
     private VaultClient GetVaultClient()
@@ -46,6 +47,11 @@ public class VaultService(
             return cachedConnectionString;
         }
 
+        return await GetNewSqlConnectionStringAsync();
+    }
+
+    public async Task<string> GetNewSqlConnectionStringAsync()
+    {
         try
         {
             var credentials = await GetVaultClient().V1.Secrets.Database
@@ -64,7 +70,7 @@ public class VaultService(
 
             // Cache the connection string and lease info
             var leaseDuration = TimeSpan.FromSeconds(credentials.LeaseDurationSeconds);
-            var cacheExpiry = DateTime.UtcNow.Add(leaseDuration).AddMinutes(-5); // Expire 5 minutes before lease expires
+            var cacheExpiry = DateTime.UtcNow.Add(leaseDuration).AddMinutes(-5);
 
             var cacheOptions = new MemoryCacheEntryOptions
             {
@@ -79,11 +85,18 @@ public class VaultService(
             {
                 LeaseId = credentials.LeaseId,
                 LeaseDuration = leaseDuration,
-                ExpiresAt = cacheExpiry
+                ExpiresAt = cacheExpiry,
+                CreatedAt = DateTime.UtcNow,
+                Username = credentials.Data.Username,
+                IsCurrentlyUsed = true
             };
             _memoryCache.Set(LEASE_INFO_CACHE_KEY, leaseInfo, cacheOptions);
 
-            logger.LogInformation("Retrieved and cached dynamic database credentials. Expires at: {ExpiryTime}", cacheExpiry);
+            // Update all leases cache
+            await UpdateAllLeasesCache(leaseInfo);
+
+            logger.LogInformation("Retrieved new database credentials. Username: {Username}, Expires at: {ExpiryTime}",
+                credentials.Data.Username, cacheExpiry);
             return connectionString;
         }
         catch (Exception ex)
@@ -96,6 +109,121 @@ public class VaultService(
     public async Task RenewLeaseAsync(string leaseId, int incrementSeconds = 3600)
     {
         await GetVaultClient().V1.System.RenewLeaseAsync(leaseId, incrementSeconds);
+        logger.LogInformation("Renewed lease {LeaseId} for {Seconds} seconds", leaseId, incrementSeconds);
+    }
+
+    public async Task RevokeSingleLeaseAsync(string leaseId)
+    {
+        try
+        {
+            await GetVaultClient().V1.System.RevokeLeaseAsync(leaseId);
+
+            // If this is the current lease, invalidate cache
+            var currentLease = GetCurrentLeaseInfo();
+            if (currentLease?.LeaseId == leaseId)
+            {
+                InvalidateConnectionCache();
+            }
+
+            // Remove from all leases cache
+            var allLeases = await GetAllActiveLeasesAsync();
+            allLeases.RemoveAll(l => l.LeaseId == leaseId);
+            _memoryCache.Set(ALL_LEASES_CACHE_KEY, allLeases, TimeSpan.FromMinutes(5));
+
+            logger.LogInformation("Revoked lease {LeaseId}", leaseId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to revoke lease {LeaseId}", leaseId);
+            throw;
+        }
+    }
+
+    public async Task RevokeAllLeasesAsync()
+    {
+        try
+        {
+            // Get all leases and revoke them
+            var allLeases = await GetAllActiveLeasesAsync();
+
+            foreach (var lease in allLeases.ToList())
+            {
+                try
+                {
+                    await RevokeSingleLeaseAsync(lease.LeaseId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to revoke lease {LeaseId}", lease.LeaseId);
+                }
+            }
+
+            // Clear all caches
+            InvalidateConnectionCache();
+            _memoryCache.Remove(ALL_LEASES_CACHE_KEY);
+
+            logger.LogInformation("Attempted to revoke all leases");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to revoke all leases");
+            throw;
+        }
+    }
+
+    public async Task<List<LeaseInfo>> GetAllActiveLeasesAsync()
+    {
+        // Try cache first
+        if (_memoryCache.TryGetValue(ALL_LEASES_CACHE_KEY, out List<LeaseInfo>? cachedLeases) &&
+            cachedLeases != null)
+        {
+            // Update current lease status
+            var currentLease = GetCurrentLeaseInfo();
+            foreach (var lease in cachedLeases)
+            {
+                lease.IsCurrentlyUsed = currentLease?.LeaseId == lease.LeaseId;
+            }
+
+            return cachedLeases.Where(l => !l.IsExpired).ToList();
+        }
+
+        // For demo purposes, we'll maintain a simple list
+        // In production, you might query Vault's sys/leases endpoint if available
+        var leases = new List<LeaseInfo>();
+        var currentLeaseInfo = GetCurrentLeaseInfo();
+
+        if (currentLeaseInfo != null)
+        {
+            leases.Add(currentLeaseInfo);
+        }
+
+        _memoryCache.Set(ALL_LEASES_CACHE_KEY, leases, TimeSpan.FromMinutes(5));
+        return leases;
+    }
+
+    private async Task UpdateAllLeasesCache(LeaseInfo newLease)
+    {
+        var allLeases = await GetAllActiveLeasesAsync();
+
+        // Mark all other leases as not currently used
+        foreach (var lease in allLeases)
+        {
+            lease.IsCurrentlyUsed = false;
+        }
+
+        // Add or update the new lease
+        var existingLease = allLeases.FirstOrDefault(l => l.LeaseId == newLease.LeaseId);
+        if (existingLease != null)
+        {
+            allLeases.Remove(existingLease);
+        }
+
+        allLeases.Add(newLease);
+
+        // Remove expired leases
+        allLeases.RemoveAll(l => l.IsExpired);
+
+        _memoryCache.Set(ALL_LEASES_CACHE_KEY, allLeases, TimeSpan.FromMinutes(5));
     }
 
     public void InvalidateConnectionCache()
@@ -115,7 +243,6 @@ public class VaultService(
     {
         var cacheKey = $"vault_secret_{path}_{key}";
 
-        // Try cache first
         if (_memoryCache.TryGetValue(cacheKey, out string? cachedSecret) &&
             !string.IsNullOrEmpty(cachedSecret))
         {
@@ -129,7 +256,6 @@ public class VaultService(
             {
                 var secretValue = value.ToString();
 
-                // Cache static secrets for longer (use config setting)
                 var cacheOptions = new MemoryCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
@@ -172,11 +298,4 @@ public class VaultService(
             return false;
         }
     }
-}
-
-public class LeaseInfo
-{
-    public string LeaseId { get; set; } = string.Empty;
-    public TimeSpan LeaseDuration { get; set; }
-    public DateTime ExpiresAt { get; set; }
 }
