@@ -17,15 +17,25 @@ builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =
 {
     var vaultService = serviceProvider.GetRequiredService<IVaultService>();
     var logger = serviceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
-
     var connectionString = GetConnectionStringWithRetry(vaultService, logger);
+    options.UseSqlServer(connectionString, sqlOptions =>
+    {
+        // Add connection resiliency
+        sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorNumbersToAdd: [18456]); // Login failed error
 
-    // Create a SqlConnection that EF Core will reuse when needed
-    var connection = new SqlConnection(connectionString);
+        // Set command timeout for long operations
+        sqlOptions.CommandTimeout(300); // 5 minutes for bulk operations
+    });
 
-    options.UseSqlServer(connection);
+    // Enable sensitive data logging in development
+    if (serviceProvider.GetService<IWebHostEnvironment>()?.IsDevelopment() == true)
+    {
+        options.EnableSensitiveDataLogging();
+    }
 });
-
 
 // Register the interface
 builder.Services.AddScoped<IApplicationDbContext>(provider =>
