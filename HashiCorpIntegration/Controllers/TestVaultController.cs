@@ -3,18 +3,41 @@ using HashiCorpIntegration.Data;
 using HashiCorpIntegration.Vault;
 using Microsoft.EntityFrameworkCore;
 using HashiCorpIntegration.Models;
+using Microsoft.Extensions.Options;
 
 namespace HashiCorpIntegration.Controllers;
 
 public class TestVaultController(
     IVaultService vaultService,
     IServiceProvider serviceProvider,
+    IOptions<VaultSettings> vaultSettings,
     ILogger<TestVaultController> logger) : Controller
 {
+    private readonly VaultSettings _vaultSettings = vaultSettings.Value;
+
     public async Task<IActionResult> Index()
     {
-        var model = new VaultDashboardViewModel();
+        var model = new VaultDashboardViewModel
+        {
+            UseStaticCredentials = _vaultSettings.UseStaticCredentials
+        };
 
+        if (_vaultSettings.UseStaticCredentials)
+        {
+            await LoadStaticCredentialData(model);
+        }
+        else
+        {
+            await LoadDynamicCredentialData(model);
+        }
+
+        await TestDatabaseConnection(model);
+
+        return View(model);
+    }
+
+    private async Task LoadDynamicCredentialData(VaultDashboardViewModel model)
+    {
         // Get current lease info (don't create new one)
         var currentLease = vaultService.GetCurrentLeaseInfo();
         if (currentLease != null)
@@ -52,31 +75,58 @@ public class TestVaultController(
             model.Error = $"Failed to load leases: {ex.Message}";
             logger.LogError(ex, "Failed to load all leases");
         }
+    }
 
-        // Test Database connection using current lease
-        if (currentLease != null && !currentLease.IsExpired)
+    private async Task LoadStaticCredentialData(VaultDashboardViewModel model)
+    {
+        try
         {
-            try
+            var staticInfo = await vaultService.GetStaticCredentialInfoAsync();
+            if (staticInfo != null)
             {
-                using var scope = serviceProvider.CreateScope();
-                using var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                model.DatabaseConnectionSuccess = await dbContext.Database.CanConnectAsync();
-
-                if (model.DatabaseConnectionSuccess)
+                model.StaticCredential = new StaticCredentialViewModel
                 {
-                    model.CategoriesCount = await dbContext.Categories.CountAsync();
-                    model.ProductsCount = await dbContext.Products.CountAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                model.DatabaseConnectionSuccess = false;
-                model.DatabaseError = ex.Message;
-                logger.LogError(ex, "Database connection test failed");
+                    Username = staticInfo.Username,
+                    LastRotated = staticInfo.LastRotated,
+                    RotationPeriod = staticInfo.RotationPeriod,
+                    NextRotation = staticInfo.NextRotation,
+                    RetrievedAt = staticInfo.RetrievedAt,
+                    IsExpired = staticInfo.IsExpired,
+                    TimeUntilRotation = staticInfo.TimeUntilRotation
+                };
             }
         }
+        catch (Exception ex)
+        {
+            model.Error = $"Failed to load static credential info: {ex.Message}";
+            logger.LogError(ex, "Failed to load static credential info");
+        }
 
-        return View(model);
+        // Note: For demo purposes, you might want to load rotation history from a persistent store
+        // For now, we'll show empty rotation history
+        model.RotationHistory = new List<RotationHistoryViewModel>();
+    }
+
+    private async Task TestDatabaseConnection(VaultDashboardViewModel model)
+    {
+        try
+        {
+            using var scope = serviceProvider.CreateScope();
+            using var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            model.DatabaseConnectionSuccess = await dbContext.Database.CanConnectAsync();
+
+            if (model.DatabaseConnectionSuccess)
+            {
+                model.CategoriesCount = await dbContext.Categories.CountAsync();
+                model.ProductsCount = await dbContext.Products.CountAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            model.DatabaseConnectionSuccess = false;
+            model.DatabaseError = ex.Message;
+            logger.LogError(ex, "Database connection test failed");
+        }
     }
 
     [HttpPost]
@@ -84,8 +134,17 @@ public class TestVaultController(
     {
         try
         {
-            await vaultService.GetNewSqlConnectionStringAsync();
-            TempData["Success"] = "New connection credentials obtained successfully!";
+            if (_vaultSettings.UseStaticCredentials)
+            {
+                vaultService.InvalidateStaticConnectionCache();
+                await vaultService.GetStaticConnectionStringAsync();
+                TempData["Success"] = "Static credentials refreshed successfully!";
+            }
+            else
+            {
+                await vaultService.GetNewSqlConnectionStringAsync();
+                TempData["Success"] = "New dynamic connection credentials obtained successfully!";
+            }
         }
         catch (Exception ex)
         {
@@ -97,8 +156,44 @@ public class TestVaultController(
     }
 
     [HttpPost]
+    public async Task<IActionResult> RotateStaticCredentials()
+    {
+        if (!_vaultSettings.UseStaticCredentials)
+        {
+            TempData["Error"] = "Static credentials are not enabled";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            var rotationInfo = await vaultService.RotateStaticCredentialsAsync();
+            if (rotationInfo.Success)
+            {
+                TempData["Success"] = $"Static credentials rotated successfully for user: {rotationInfo.Username}";
+            }
+            else
+            {
+                TempData["Error"] = $"Failed to rotate static credentials: {rotationInfo.Error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to rotate static credentials: {ex.Message}";
+            logger.LogError(ex, "Failed to rotate static credentials");
+        }
+
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost]
     public async Task<IActionResult> RevokeLease(string leaseId)
     {
+        if (_vaultSettings.UseStaticCredentials)
+        {
+            TempData["Error"] = "Lease operations are not available for static credentials";
+            return RedirectToAction(nameof(Index));
+        }
+
         if (string.IsNullOrEmpty(leaseId))
         {
             TempData["Error"] = "Lease ID is required";
@@ -122,6 +217,12 @@ public class TestVaultController(
     [HttpPost]
     public async Task<IActionResult> RevokeAllLeases()
     {
+        if (_vaultSettings.UseStaticCredentials)
+        {
+            TempData["Error"] = "Lease operations are not available for static credentials";
+            return RedirectToAction(nameof(Index));
+        }
+
         try
         {
             await vaultService.RevokeAllLeasesAsync();
@@ -139,6 +240,12 @@ public class TestVaultController(
     [HttpPost]
     public async Task<IActionResult> RenewLease(string leaseId, int incrementSeconds = 3600)
     {
+        if (_vaultSettings.UseStaticCredentials)
+        {
+            TempData["Error"] = "Lease operations are not available for static credentials";
+            return RedirectToAction(nameof(Index));
+        }
+
         if (string.IsNullOrEmpty(leaseId))
         {
             TempData["Error"] = "Lease ID is required";
@@ -159,7 +266,6 @@ public class TestVaultController(
         return RedirectToAction(nameof(Index));
     }
 
-    // Keep existing methods for compatibility
     public async Task<IActionResult> TestQuery()
     {
         var model = new DatabaseQueryTestViewModel();
@@ -193,24 +299,59 @@ public class TestVaultController(
     public async Task<IActionResult> CredentialInfo()
     {
         var model = new CredentialInfoViewModel();
-        var currentLease = vaultService.GetCurrentLeaseInfo();
 
-        if (currentLease != null)
+        try
         {
-            model.Username = currentLease.Username;
-            model.IsVaultGenerated = currentLease.Username.StartsWith("v-token-", StringComparison.OrdinalIgnoreCase);
-            model.Success = true;
-            model.RetrievedAt = DateTime.Now;
-            model.LeaseId = currentLease.LeaseId;
-            model.ExpiresAt = currentLease.ExpiresAt;
-            model.TimeRemaining = currentLease.TimeRemaining;
+            if (_vaultSettings.UseStaticCredentials)
+            {
+                var staticInfo = await vaultService.GetStaticCredentialInfoAsync();
+                if (staticInfo != null)
+                {
+                    model.Username = staticInfo.Username;
+                    model.IsVaultGenerated = true; // Static credentials are always managed by Vault
+                    model.Success = true;
+                    model.RetrievedAt = staticInfo.RetrievedAt;
+                    model.IsStatic = true;
+                    model.LastRotated = staticInfo.LastRotated;
+                    model.NextRotation = staticInfo.NextRotation;
+                    model.RotationPeriod = staticInfo.RotationPeriod;
 
-            logger.LogInformation("Retrieved credential info for username: {Username}", model.Username);
+                    logger.LogInformation("Retrieved static credential info for username: {Username}", model.Username);
+                }
+                else
+                {
+                    model.Success = false;
+                    model.Error = "No static credential info found";
+                }
+            }
+            else
+            {
+                var currentLease = vaultService.GetCurrentLeaseInfo();
+                if (currentLease != null)
+                {
+                    model.Username = currentLease.Username;
+                    model.IsVaultGenerated = currentLease.Username.StartsWith("v-token-", StringComparison.OrdinalIgnoreCase);
+                    model.Success = true;
+                    model.RetrievedAt = currentLease.CreatedAt;
+                    model.LeaseId = currentLease.LeaseId;
+                    model.ExpiresAt = currentLease.ExpiresAt;
+                    model.TimeRemaining = currentLease.TimeRemaining;
+                    model.IsStatic = false;
+
+                    logger.LogInformation("Retrieved dynamic credential info for username: {Username}", model.Username);
+                }
+                else
+                {
+                    model.Success = false;
+                    model.Error = "No active lease found";
+                }
+            }
         }
-        else
+        catch (Exception ex)
         {
             model.Success = false;
-            model.Error = "No active lease found";
+            model.Error = ex.Message;
+            logger.LogError(ex, "Failed to retrieve credential info");
         }
 
         return View(model);
@@ -219,23 +360,71 @@ public class TestVaultController(
     [HttpGet]
     public async Task<IActionResult> HealthCheck()
     {
-        var currentLease = vaultService.GetCurrentLeaseInfo();
-
         var health = new
         {
             timestamp = DateTime.UtcNow,
-            vault = new { healthy = false, error = (string?)null, currentLease = currentLease?.LeaseId },
+            credentialType = _vaultSettings.UseStaticCredentials ? "static" : "dynamic",
+            vault = new { healthy = false, error = (string?)null, details = (object?)null },
             database = new { healthy = false, error = (string?)null }
         };
 
-        // Check if we have a current lease (don't create new one)
-        if (currentLease != null && !currentLease.IsExpired)
+        try
         {
-            health = health with { vault = health.vault with { healthy = true } };
+            if (_vaultSettings.UseStaticCredentials)
+            {
+                var staticInfo = await vaultService.GetStaticCredentialInfoAsync();
+                if (staticInfo != null)
+                {
+                    health = health with
+                    {
+                        vault = health.vault with
+                        {
+                            healthy = true,
+                            details = new
+                            {
+                                username = staticInfo.Username,
+                                lastRotated = staticInfo.LastRotated,
+                                nextRotation = staticInfo.NextRotation,
+                                isExpired = staticInfo.IsExpired,
+                                timeUntilRotation = staticInfo.TimeUntilRotation
+                            }
+                        }
+                    };
+                }
+                else
+                {
+                    health = health with { vault = health.vault with { error = "No static credential info available" } };
+                }
+            }
+            else
+            {
+                var currentLease = vaultService.GetCurrentLeaseInfo();
+                if (currentLease != null && !currentLease.IsExpired)
+                {
+                    health = health with
+                    {
+                        vault = health.vault with
+                        {
+                            healthy = true,
+                            details = new
+                            {
+                                leaseId = currentLease.LeaseId,
+                                username = currentLease.Username,
+                                expiresAt = currentLease.ExpiresAt,
+                                timeRemaining = currentLease.TimeRemaining
+                            }
+                        }
+                    };
+                }
+                else
+                {
+                    health = health with { vault = health.vault with { error = "No active lease or lease expired" } };
+                }
+            }
         }
-        else
+        catch (Exception ex)
         {
-            health = health with { vault = health.vault with { error = "No active lease or lease expired" } };
+            health = health with { vault = health.vault with { error = ex.Message } };
         }
 
         try

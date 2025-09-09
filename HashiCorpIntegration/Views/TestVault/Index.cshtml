@@ -8,6 +8,9 @@
 <div class="container-fluid mt-4">
     <h2 class="mb-4">
         <i class="fas fa-vault"></i> Vault Dashboard
+        <span class="badge @(Model.UseStaticCredentials ? "bg-info" : "bg-primary") ms-2">
+            @(Model.UseStaticCredentials ? "Static Credentials" : "Dynamic Credentials")
+        </span>
     </h2>
 
     <!-- Alert Messages -->
@@ -35,92 +38,251 @@
     }
 
     <div class="row">
-        <!-- Current Active Lease Card -->
-        <div class="col-lg-6 mb-4">
-            <div class="card border-primary">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-key"></i> Current Active Lease
-                    </h5>
-                </div>
-                <div class="card-body">
-                    @if (Model.CurrentLease != null)
-                    {
-                        <div class="row">
-                            <div class="col-sm-6">
-                                <strong>Lease ID:</strong><br>
-                                <code class="text-primary">@Model.CurrentLease.LeaseId</code>
-                            </div>
-                            <div class="col-sm-6">
-                                <strong>Username:</strong><br>
-                                <span class="badge bg-info">@Model.CurrentLease.Username</span>
-                            </div>
-                        </div>
-
-                        <hr>
-
-                        <div class="row">
-                            <div class="col-sm-6">
-                                <strong>Created:</strong><br>
-                                @Model.CurrentLease.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
-                            </div>
-                            <div class="col-sm-6">
-                                <strong>Expires:</strong><br>
-                                @Model.CurrentLease.ExpiresAt.ToString("yyyy-MM-dd HH:mm:ss")
-                            </div>
-                        </div>
-
-                        <div class="mt-3">
-                            @if (!Model.CurrentLease.IsExpired)
-                            {
-                                <div class="alert alert-success">
-                                    <i class="fas fa-clock"></i>
-                                    <strong>Time Remaining:</strong>
-                                    @($"{Model.CurrentLease.TimeRemaining.Hours}h {Model.CurrentLease.TimeRemaining.Minutes}m {Model.CurrentLease.TimeRemaining.Seconds}s")
+        @if (Model.UseStaticCredentials)
+        {
+            <!-- Static Credential Card -->
+            <div class="col-lg-6 mb-4">
+                <div class="card border-info">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-key"></i> Static Credential Information
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        @if (Model.StaticCredential != null)
+                        {
+                            <div class="row mb-3">
+                                <div class="col-sm-6">
+                                    <strong>Username:</strong><br>
+                                    <span class="badge bg-info">@Model.StaticCredential.Username</span>
                                 </div>
-                            }
-                            else
-                            {
-                                <div class="alert alert-danger">
-                                    <i class="fas fa-exclamation-circle"></i>
-                                    <strong>EXPIRED</strong>
+                                <div class="col-sm-6">
+                                    <strong>Status:</strong><br>
+                                    @if (!Model.StaticCredential.IsExpired)
+                                    {
+                                        <span class="badge bg-success">ACTIVE</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning">ROTATION NEEDED</span>
+                                    }
                                 </div>
-                            }
-                        </div>
+                            </div>
 
-                        <div class="btn-group w-100" role="group">
-                            <form asp-action="RenewLease" method="post" class="d-inline">
-                                <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
-                                <input type="hidden" name="incrementSeconds" value="3600" />
-                                <button type="submit" class="btn btn-success btn-sm"
-                                @(Model.CurrentLease.IsExpired ? "disabled" : "")>
-                                    <i class="fas fa-refresh"></i> Renew (1h)
-                                </button>
-                            </form>
-                            <form asp-action="RevokeLease" method="post" class="d-inline"
-                                  onsubmit="return confirm('Are you sure you want to revoke the current lease?')">
-                                <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
-                                <button type="submit" class="btn btn-danger btn-sm">
-                                    <i class="fas fa-times"></i> Revoke
-                                </button>
-                            </form>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="text-center text-muted py-4">
-                            <i class="fas fa-exclamation-circle fa-2x"></i>
-                            <p class="mt-2">No active lease found</p>
-                            <form asp-action="GetNewConnection" method="post" class="d-inline">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-plus"></i> Get New Connection
-                                </button>
-                            </form>
-                        </div>
-                    }
+                            <hr>
+
+                            <div class="row mb-3">
+                                <div class="col-sm-6">
+                                    <strong>Last Rotated:</strong><br>
+                                    @Model.StaticCredential.LastRotated.ToString("yyyy-MM-dd HH:mm:ss")
+                                </div>
+                                <div class="col-sm-6">
+                                    <strong>Next Rotation:</strong><br>
+                                    @Model.StaticCredential.NextRotation.ToString("yyyy-MM-dd HH:mm:ss")
+                                </div>
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-sm-6">
+                                    <strong>Rotation Period:</strong><br>
+                                    @($"{Model.StaticCredential.RotationPeriod.TotalHours:F0} hours")
+                                </div>
+                                <div class="col-sm-6">
+                                    <strong>Retrieved At:</strong><br>
+                                    @Model.StaticCredential.RetrievedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                                </div>
+                            </div>
+
+                            <div class="mt-3">
+                                @if (!Model.StaticCredential.IsExpired)
+                                {
+                                    <div class="alert alert-success">
+                                        <i class="fas fa-clock"></i>
+                                        <strong>Time Until Rotation:</strong>
+                                        @($"{Model.StaticCredential.TimeUntilRotation.Days}d {Model.StaticCredential.TimeUntilRotation.Hours}h {Model.StaticCredential.TimeUntilRotation.Minutes}m")
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                        <strong>ROTATION NEEDED</strong>
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="btn-group w-100" role="group">
+                                <form asp-action="RotateStaticCredentials" method="post" class="d-inline"
+                                      onsubmit="return confirm('Are you sure you want to rotate the static credentials? This will change the password.')">
+                                    <button type="submit" class="btn btn-warning btn-sm">
+                                        <i class="fas fa-sync-alt"></i> Rotate Now
+                                    </button>
+                                </form>
+                                <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                    <button type="submit" class="btn btn-info btn-sm">
+                                        <i class="fas fa-refresh"></i> Refresh Cache
+                                    </button>
+                                </form>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-exclamation-circle fa-2x"></i>
+                                <p class="mt-2">No static credential information found</p>
+                                <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                    <button type="submit" class="btn btn-info">
+                                        <i class="fas fa-refresh"></i> Load Static Credentials
+                                    </button>
+                                </form>
+                            </div>
+                        }
+                    </div>
                 </div>
             </div>
-        </div>
+
+            <!-- Static Credential Rotation History -->
+            <div class="col-lg-6 mb-4">
+                <div class="card border-secondary">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-history"></i> Rotation History
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        @if (Model.RotationHistory.Any())
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Username</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var rotation in Model.RotationHistory.OrderByDescending(r => r.RotatedAt).Take(10))
+                                        {
+                                            <tr>
+                                                <td class="small">@rotation.RotatedAt.ToString("MM/dd HH:mm")</td>
+                                                <td class="small">@rotation.Username</td>
+                                                <td>
+                                                    @if (rotation.Success)
+                                                    {
+                                                        <span class="badge bg-success">Success</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-danger" title="@rotation.Error">Failed</span>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-history fa-2x"></i>
+                                <p class="mt-2">No rotation history available</p>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <!-- Current Active Lease Card -->
+            <div class="col-lg-6 mb-4">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-key"></i> Current Active Lease
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        @if (Model.CurrentLease != null)
+                        {
+                            <div class="row">
+                                <div class="col-sm-6">
+                                    <strong>Lease ID:</strong><br>
+                                    <code class="text-primary">@Model.CurrentLease.LeaseId</code>
+                                </div>
+                                <div class="col-sm-6">
+                                    <strong>Username:</strong><br>
+                                    <span class="badge bg-info">@Model.CurrentLease.Username</span>
+                                </div>
+                            </div>
+
+                            <hr>
+
+                            <div class="row">
+                                <div class="col-sm-6">
+                                    <strong>Created:</strong><br>
+                                    @Model.CurrentLease.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                                </div>
+                                <div class="col-sm-6">
+                                    <strong>Expires:</strong><br>
+                                    @Model.CurrentLease.ExpiresAt.ToString("yyyy-MM-dd HH:mm:ss")
+                                </div>
+                            </div>
+
+                            <div class="mt-3">
+                                @if (!Model.CurrentLease.IsExpired)
+                                {
+                                    <div class="alert alert-success">
+                                        <i class="fas fa-clock"></i>
+                                        <strong>Time Remaining:</strong>
+                                        @($"{Model.CurrentLease.TimeRemaining.Hours}h {Model.CurrentLease.TimeRemaining.Minutes}m {Model.CurrentLease.TimeRemaining.Seconds}s")
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="alert alert-danger">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                        <strong>EXPIRED</strong>
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="btn-group w-100" role="group">
+                                <form asp-action="RenewLease" method="post" class="d-inline">
+                                    <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
+                                    <input type="hidden" name="incrementSeconds" value="3600" />
+                                    <button type="submit" class="btn btn-success btn-sm"
+                                    @(Model.CurrentLease.IsExpired ? "disabled" : "")>
+                                        <i class="fas fa-refresh"></i> Renew (1h)
+                                    </button>
+                                </form>
+                                <form asp-action="RevokeLease" method="post" class="d-inline"
+                                      onsubmit="return confirm('Are you sure you want to revoke the current lease?')">
+                                    <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
+                                    <button type="submit" class="btn btn-danger btn-sm">
+                                        <i class="fas fa-times"></i> Revoke
+                                    </button>
+                                </form>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-exclamation-circle fa-2x"></i>
+                                <p class="mt-2">No active lease found</p>
+                                <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-plus"></i> Get New Connection
+                                    </button>
+                                </form>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
 
         <!-- Database Connection Status -->
         <div class="col-lg-6 mb-4">
@@ -136,6 +298,7 @@
                         <div class="alert alert-success">
                             <i class="fas fa-check-circle"></i>
                             <strong>Connected Successfully</strong>
+                            <small class="d-block">Using @(Model.UseStaticCredentials ? "static" : "dynamic") credentials</small>
                         </div>
 
                         <div class="row">
@@ -157,11 +320,12 @@
                         </div>
                         <small class="text-muted">@Model.DatabaseError</small>
                     }
-                    else if (Model.CurrentLease == null)
+                    else if ((Model.UseStaticCredentials && Model.StaticCredential == null) ||
+                    (!Model.UseStaticCredentials && Model.CurrentLease == null))
                     {
                         <div class="text-center text-muted py-4">
                             <i class="fas fa-info-circle fa-2x"></i>
-                            <p class="mt-2">No active lease to test connection</p>
+                            <p class="mt-2">No active @(Model.UseStaticCredentials ? "static credentials" : "lease") to test connection</p>
                         </div>
                     }
                     else
@@ -187,13 +351,41 @@
                 </div>
                 <div class="card-body">
                     <div class="btn-group" role="group">
-                        <form asp-action="GetNewConnection" method="post" class="d-inline">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-plus"></i> Get New Connection
-                            </button>
-                        </form>
+                        @if (Model.UseStaticCredentials)
+                        {
+                            <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                <button type="submit" class="btn btn-info">
+                                    <i class="fas fa-refresh"></i> Refresh Static Credentials
+                                </button>
+                            </form>
 
-                        <a href="@Url.Action("TestQuery")" class="btn btn-info">
+                            <form asp-action="RotateStaticCredentials" method="post" class="d-inline"
+                                  onsubmit="return confirm('Are you sure you want to rotate the static credentials? This will change the password.')">
+                                <button type="submit" class="btn btn-warning">
+                                    <i class="fas fa-sync-alt"></i> Rotate Static Credentials
+                                </button>
+                            </form>
+                        }
+                        else
+                        {
+                            <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-plus"></i> Get New Connection
+                                </button>
+                            </form>
+
+                            @if (Model.AllLeases.Any())
+                            {
+                                <form asp-action="RevokeAllLeases" method="post" class="d-inline"
+                                      onsubmit="return confirm('Are you sure you want to revoke ALL leases? This will invalidate all active connections.')">
+                                    <button type="submit" class="btn btn-danger">
+                                        <i class="fas fa-trash-alt"></i> Revoke All Leases
+                                    </button>
+                                </form>
+                            }
+                        }
+
+                        <a href="@Url.Action("TestQuery")" class="btn btn-success">
                             <i class="fas fa-play"></i> Test Query
                         </a>
 
@@ -201,165 +393,163 @@
                             <i class="fas fa-info"></i> Credential Details
                         </a>
 
-                        <a href="@Url.Action("HealthCheck")" class="btn btn-success" target="_blank">
+                        <a href="@Url.Action("HealthCheck")" class="btn btn-outline-primary" target="_blank">
                             <i class="fas fa-heartbeat"></i> Health Check (JSON)
                         </a>
                     </div>
-
-                    @if (Model.AllLeases.Any())
-                    {
-                        <div class="mt-3">
-                            <form asp-action="RevokeAllLeases" method="post" class="d-inline"
-                                  onsubmit="return confirm('Are you sure you want to revoke ALL leases? This will invalidate all active connections.')">
-                                <button type="submit" class="btn btn-danger">
-                                    <i class="fas fa-trash-alt"></i> Revoke All Leases
-                                </button>
-                            </form>
-                        </div>
-                    }
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- All Leases Table -->
-    <div class="row mb-5">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">
-                        <i class="fas fa-list"></i> All Active Leases (@Model.AllLeases.Count)
-                    </h5>
-                </div>
-                <div class="card-body">
-                    @if (Model.AllLeases.Any())
-                    {
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Status</th>
-                                        <th>Lease ID</th>
-                                        <th>Username</th>
-                                        <th>Created</th>
-                                        <th>Expires</th>
-                                        <th>Time Remaining</th>
-                                        <th>Duration</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var lease in Model.AllLeases.OrderByDescending(l => l.IsCurrentlyUsed).ThenBy(l => l.ExpiresAt))
-                                    {
-                                        <tr class="@(lease.IsCurrentlyUsed ? "table-primary" : "") @(lease.IsExpired ? "table-danger" : "")">
-                                            <td>
-                                                @if (lease.IsCurrentlyUsed)
-                                                {
-                                                    <span class="badge bg-primary">
-                                                        <i class="fas fa-star"></i> CURRENT
-                                                    </span>
-                                                }
-                                                else if (lease.IsExpired)
-                                                {
-                                                    <span class="badge bg-danger">
-                                                        <i class="fas fa-times"></i> EXPIRED
-                                                    </span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="badge bg-success">
-                                                        <i class="fas fa-check"></i> ACTIVE
-                                                    </span>
-                                                }
-                                            </td>
-                                            <td>
-                                                <code class="small">@lease.LeaseId</code>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-info">@lease.Username</span>
-                                            </td>
-                                            <td class="small">
-                                                @lease.CreatedAt.ToString("MM/dd HH:mm:ss")
-                                            </td>
-                                            <td class="small">
-                                                @lease.ExpiresAt.ToString("MM/dd HH:mm:ss")
-                                            </td>
-                                            <td class="small">
-                                                @if (!lease.IsExpired)
-                                                {
-                                                    <span class="text-success">
-                                                        @($"{lease.TimeRemaining.Hours:D2}:{lease.TimeRemaining.Minutes:D2}:{lease.TimeRemaining.Seconds:D2}")
-                                                    </span>
-                                                }
-                                                else
-                                                {
-                                                    <span class="text-danger">EXPIRED</span>
-                                                }
-                                            </td>
-                                            <td class="small">
-                                                @($"{lease.LeaseDuration.TotalMinutes:F0}m")
-                                            </td>
-                                            <td>
-                                                <div class="btn-group btn-group-sm" role="group">
-                                                    <form asp-action="RenewLease" method="post" class="d-inline">
-                                                        <input type="hidden" name="leaseId" value="@lease.LeaseId" />
-                                                        <input type="hidden" name="incrementSeconds" value="3600" />
-                                                        <button type="submit" class="btn btn-outline-success btn-sm"
-                                                        @(lease.IsExpired ? "disabled" : "")
-                                                                title="Renew for 1 hour">
-                                                            <i class="fas fa-refresh"></i>
-                                                        </button>
-                                                    </form>
-
-                                                    <form asp-action="RevokeLease" method="post" class="d-inline"
-                                                          onsubmit="return confirm('Are you sure you want to revoke this lease?')">
-                                                        <input type="hidden" name="leaseId" value="@lease.LeaseId" />
-                                                        <button type="submit" class="btn btn-outline-danger btn-sm"
-                                                                title="Revoke lease">
-                                                            <i class="fas fa-times"></i>
-                                                        </button>
-                                                    </form>
-                                                </div>
-                                            </td>
+    @if (!Model.UseStaticCredentials)
+    {
+        <!-- All Leases Table (Dynamic Credentials Only) -->
+        <div class="row mb-5">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-list"></i> All Active Leases (@Model.AllLeases.Count)
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        @if (Model.AllLeases.Any())
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Status</th>
+                                            <th>Lease ID</th>
+                                            <th>Username</th>
+                                            <th>Created</th>
+                                            <th>Expires</th>
+                                            <th>Time Remaining</th>
+                                            <th>Duration</th>
+                                            <th>Actions</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="text-center text-muted py-5">
-                            <i class="fas fa-inbox fa-3x"></i>
-                            <p class="mt-3 mb-4">No active leases found</p>
-                            <form asp-action="GetNewConnection" method="post" class="d-inline">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-plus"></i> Create First Lease
-                                </button>
-                            </form>
-                        </div>
-                    }
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var lease in Model.AllLeases.OrderByDescending(l => l.IsCurrentlyUsed).ThenBy(l => l.ExpiresAt))
+                                        {
+                                            <tr class="@(lease.IsCurrentlyUsed ? "table-primary" : "") @(lease.IsExpired ? "table-danger" : "")">
+                                                <td>
+                                                    @if (lease.IsCurrentlyUsed)
+                                                    {
+                                                        <span class="badge bg-primary">
+                                                            <i class="fas fa-star"></i> CURRENT
+                                                        </span>
+                                                    }
+                                                    else if (lease.IsExpired)
+                                                    {
+                                                        <span class="badge bg-danger">
+                                                            <i class="fas fa-times"></i> EXPIRED
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-success">
+                                                            <i class="fas fa-check"></i> ACTIVE
+                                                        </span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <code class="small">@lease.LeaseId</code>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-info">@lease.Username</span>
+                                                </td>
+                                                <td class="small">
+                                                    @lease.CreatedAt.ToString("MM/dd HH:mm:ss")
+                                                </td>
+                                                <td class="small">
+                                                    @lease.ExpiresAt.ToString("MM/dd HH:mm:ss")
+                                                </td>
+                                                <td class="small">
+                                                    @if (!lease.IsExpired)
+                                                    {
+                                                        <span class="text-success">
+                                                            @($"{lease.TimeRemaining.Hours:D2}:{lease.TimeRemaining.Minutes:D2}:{lease.TimeRemaining.Seconds:D2}")
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-danger">EXPIRED</span>
+                                                    }
+                                                </td>
+                                                <td class="small">
+                                                    @($"{lease.LeaseDuration.TotalMinutes:F0}m")
+                                                </td>
+                                                <td>
+                                                    <div class="btn-group btn-group-sm" role="group">
+                                                        <form asp-action="RenewLease" method="post" class="d-inline">
+                                                            <input type="hidden" name="leaseId" value="@lease.LeaseId" />
+                                                            <input type="hidden" name="incrementSeconds" value="3600" />
+                                                            <button type="submit" class="btn btn-outline-success btn-sm"
+                                                            @(lease.IsExpired ? "disabled" : "")
+                                                                    title="Renew for 1 hour">
+                                                                <i class="fas fa-refresh"></i>
+                                                            </button>
+                                                        </form>
+
+                                                        <form asp-action="RevokeLease" method="post" class="d-inline"
+                                                              onsubmit="return confirm('Are you sure you want to revoke this lease?')">
+                                                            <input type="hidden" name="leaseId" value="@lease.LeaseId" />
+                                                            <button type="submit" class="btn btn-outline-danger btn-sm"
+                                                                    title="Revoke lease">
+                                                                <i class="fas fa-times"></i>
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center text-muted py-5">
+                                <i class="fas fa-inbox fa-3x"></i>
+                                <p class="mt-3 mb-4">No active leases found</p>
+                                <form asp-action="GetNewConnection" method="post" class="d-inline">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-plus"></i> Create First Lease
+                                    </button>
+                                </form>
+                            </div>
+                        }
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    }
 </div>
 
 <!-- Auto-refresh script -->
 <script>
-    // Auto-refresh every 30 seconds to update time remaining
     let refreshInterval;
 
     function startAutoRefresh() {
         refreshInterval = setInterval(() => {
-            // Only refresh if there are active leases
-    @if (Model.AllLeases.Any(l => !l.IsExpired))
+            // Refresh for both static and dynamic credentials to update timers
+    @if (Model.UseStaticCredentials)
     {
         <text>
-                    location.reload();
+                // Refresh every 5 minutes for static credentials to update rotation timers
+                location.reload();
         </text>
     }
-        }, 30000); // 30 seconds
+    else if (Model.AllLeases.Any(l => !l.IsExpired))
+    {
+        <text>
+                // Refresh every 30 seconds for dynamic credentials to update lease timers
+                location.reload();
+        </text>
+    }
+        }, @(Model.UseStaticCredentials ? "300000" : "30000")); // 5 minutes for static, 30 seconds for dynamic
     }
 
     function stopAutoRefresh() {

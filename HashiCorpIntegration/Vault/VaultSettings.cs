@@ -11,6 +11,7 @@ public class VaultSettings
 
     // Static credential settings
     public string StaticDatabaseRole { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
     public bool UseStaticCredentials { get; set; } = false;
 
     public string DatabaseServer { get; set; } = string.Empty;
