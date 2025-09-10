@@ -46,6 +46,7 @@ public class TestVaultController(
             {
                 LeaseId = currentLease.LeaseId,
                 Username = currentLease.Username,
+                Password = currentLease.Password,
                 CreatedAt = currentLease.CreatedAt,
                 ExpiresAt = currentLease.ExpiresAt,
                 TimeRemaining = currentLease.TimeRemaining,
@@ -62,6 +63,7 @@ public class TestVaultController(
             {
                 LeaseId = l.LeaseId,
                 Username = l.Username,
+                Password = l.Password,
                 CreatedAt = l.CreatedAt,
                 ExpiresAt = l.ExpiresAt,
                 TimeRemaining = l.TimeRemaining,
@@ -87,6 +89,7 @@ public class TestVaultController(
                 model.StaticCredential = new StaticCredentialViewModel
                 {
                     Username = staticInfo.Username,
+                    Password = staticInfo.Password,
                     LastRotated = staticInfo.LastRotated,
                     RotationPeriod = staticInfo.RotationPeriod,
                     NextRotation = staticInfo.NextRotation,
@@ -308,6 +311,7 @@ public class TestVaultController(
                 if (staticInfo != null)
                 {
                     model.Username = staticInfo.Username;
+                    model.Password = staticInfo.Password;
                     model.IsVaultGenerated = true; // Static credentials are always managed by Vault
                     model.Success = true;
                     model.RetrievedAt = staticInfo.RetrievedAt;
@@ -330,6 +334,7 @@ public class TestVaultController(
                 if (currentLease != null)
                 {
                     model.Username = currentLease.Username;
+                    model.Password = currentLease.Password;
                     model.IsVaultGenerated = currentLease.Username.StartsWith("v-token-", StringComparison.OrdinalIgnoreCase);
                     model.Success = true;
                     model.RetrievedAt = currentLease.CreatedAt;

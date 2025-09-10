@@ -3,6 +3,7 @@
 public class StaticCredentialViewModel
 {
     public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
     public DateTime LastRotated { get; set; }
     public TimeSpan RotationPeriod { get; set; }
     public DateTime NextRotation { get; set; }

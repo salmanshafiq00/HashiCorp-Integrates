@@ -52,9 +52,21 @@
                         @if (Model.StaticCredential != null)
                         {
                             <div class="row mb-3">
-                                <div class="col-sm-6">
+                                <div class="col-sm-12">
                                     <strong>Username:</strong><br>
                                     <span class="badge bg-info">@Model.StaticCredential.Username</span>
+                                </div>
+                                <div class="col-sm-12">
+                                    <strong>Password:</strong><br>
+                                    <div class="input-group input-group-sm">
+                                        <input type="password" class="form-control form-control-sm"
+                                               id="staticPassword" value="@Model.StaticCredential.Password" readonly>
+                                        <button class="btn btn-outline-secondary" type="button"
+                                                onclick="togglePassword('staticPassword', this)"
+                                                title="Show/Hide Password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="col-sm-6">
                                     <strong>Status:</strong><br>
@@ -207,14 +219,29 @@
                     <div class="card-body">
                         @if (Model.CurrentLease != null)
                         {
-                            <div class="row">
-                                <div class="col-sm-6">
+                            <div class="row mb-3">
+                                <div class="col-12">
                                     <strong>Lease ID:</strong><br>
                                     <code class="text-primary">@Model.CurrentLease.LeaseId</code>
                                 </div>
-                                <div class="col-sm-6">
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col-sm-12">
                                     <strong>Username:</strong><br>
                                     <span class="badge bg-info">@Model.CurrentLease.Username</span>
+                                </div>
+                                <div class="col-sm-12">
+                                    <strong>Password:</strong><br>
+                                    <div class="input-group input-group-sm">
+                                        <input type="password" class="form-control form-control-sm"
+                                               id="dynamicPassword" value="@Model.CurrentLease.Password" readonly>
+                                        <button class="btn btn-outline-secondary" type="button"
+                                                onclick="togglePassword('dynamicPassword', this)"
+                                                title="Show/Hide Password">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -254,6 +281,7 @@
                                     <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
                                     <input type="hidden" name="incrementSeconds" value="3600" />
                                     <button type="submit" class="btn btn-success btn-sm"
+                                            title="Extend lease validity by 1 hour"
                                     @(Model.CurrentLease.IsExpired ? "disabled" : "")>
                                         <i class="fas fa-refresh"></i> Renew (1h)
                                     </button>
@@ -261,7 +289,8 @@
                                 <form asp-action="RevokeLease" method="post" class="d-inline"
                                       onsubmit="return confirm('Are you sure you want to revoke the current lease?')">
                                     <input type="hidden" name="leaseId" value="@Model.CurrentLease.LeaseId" />
-                                    <button type="submit" class="btn btn-danger btn-sm">
+                                    <button type="submit" class="btn btn-danger btn-sm"
+                                            title="Immediately invalidate this lease and credentials">
                                         <i class="fas fa-times"></i> Revoke
                                     </button>
                                 </form>
@@ -273,7 +302,8 @@
                                 <i class="fas fa-exclamation-circle fa-2x"></i>
                                 <p class="mt-2">No active lease found</p>
                                 <form asp-action="GetNewConnection" method="post" class="d-inline">
-                                    <button type="submit" class="btn btn-primary">
+                                    <button type="submit" class="btn btn-primary"
+                                            title="Request new dynamic database credentials from Vault">
                                         <i class="fas fa-plus"></i> Get New Connection
                                     </button>
                                 </form>
@@ -349,54 +379,59 @@
                         <i class="fas fa-cogs"></i> Actions
                     </h5>
                 </div>
-                <div class="card-body">
-                    <div class="btn-group" role="group">
-                        @if (Model.UseStaticCredentials)
-                        {
-                            <form asp-action="GetNewConnection" method="post" class="d-inline">
-                                <button type="submit" class="btn btn-info">
-                                    <i class="fas fa-refresh"></i> Refresh Static Credentials
-                                </button>
-                            </form>
+                <div class="btn-group" role="group">
+                    @if (Model.UseStaticCredentials)
+                    {
+                        <form asp-action="GetNewConnection" method="post" class="d-inline">
+                            <button type="submit" class="btn btn-info"
+                                    title="Refresh cached static credentials from Vault">
+                                <i class="fas fa-refresh"></i> Refresh Static Credentials
+                            </button>
+                        </form>
 
-                            <form asp-action="RotateStaticCredentials" method="post" class="d-inline"
-                                  onsubmit="return confirm('Are you sure you want to rotate the static credentials? This will change the password.')">
-                                <button type="submit" class="btn btn-warning">
-                                    <i class="fas fa-sync-alt"></i> Rotate Static Credentials
+                        <form asp-action="RotateStaticCredentials" method="post" class="d-inline"
+                              onsubmit="return confirm('Are you sure you want to rotate the static credentials? This will change the password.')">
+                            <button type="submit" class="btn btn-warning"
+                                    title="Force immediate rotation of static database password">
+                                <i class="fas fa-sync-alt"></i> Rotate Static Credentials
+                            </button>
+                        </form>
+                    }
+                    else
+                    {
+                        <form asp-action="GetNewConnection" method="post" class="d-inline">
+                            <button type="submit" class="btn btn-primary"
+                                    title="Create new dynamic database credentials from Vault">
+                                <i class="fas fa-plus"></i> Get New Connection
+                            </button>
+                        </form>
+
+                        @if (Model.AllLeases.Any())
+                        {
+                            <form asp-action="RevokeAllLeases" method="post" class="d-inline"
+                                  onsubmit="return confirm('Are you sure you want to revoke ALL leases? This will invalidate all active connections.')">
+                                <button type="submit" class="btn btn-danger"
+                                        title="Immediately revoke all active database leases">
+                                    <i class="fas fa-trash-alt"></i> Revoke All Leases
                                 </button>
                             </form>
                         }
-                        else
-                        {
-                            <form asp-action="GetNewConnection" method="post" class="d-inline">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-plus"></i> Get New Connection
-                                </button>
-                            </form>
+                    }
 
-                            @if (Model.AllLeases.Any())
-                            {
-                                <form asp-action="RevokeAllLeases" method="post" class="d-inline"
-                                      onsubmit="return confirm('Are you sure you want to revoke ALL leases? This will invalidate all active connections.')">
-                                    <button type="submit" class="btn btn-danger">
-                                        <i class="fas fa-trash-alt"></i> Revoke All Leases
-                                    </button>
-                                </form>
-                            }
-                        }
+                    <a href="@Url.Action("TestQuery")" class="btn btn-success"
+                       title="Execute test queries against database using current credentials">
+                        <i class="fas fa-play"></i> Test Query
+                    </a>
 
-                        <a href="@Url.Action("TestQuery")" class="btn btn-success">
-                            <i class="fas fa-play"></i> Test Query
-                        </a>
+                    <a href="@Url.Action("CredentialInfo")" class="btn btn-secondary"
+                       title="View detailed information about current database credentials">
+                        <i class="fas fa-info"></i> Credential Details
+                    </a>
 
-                        <a href="@Url.Action("CredentialInfo")" class="btn btn-secondary">
-                            <i class="fas fa-info"></i> Credential Details
-                        </a>
-
-                        <a href="@Url.Action("HealthCheck")" class="btn btn-outline-primary" target="_blank">
-                            <i class="fas fa-heartbeat"></i> Health Check (JSON)
-                        </a>
-                    </div>
+                    <a href="@Url.Action("HealthCheck")" class="btn btn-outline-primary" target="_blank"
+                       title="View system health status in JSON format">
+                        <i class="fas fa-heartbeat"></i> Health Check (JSON)
+                    </a>
                 </div>
             </div>
         </div>
@@ -538,15 +573,15 @@
     @if (Model.UseStaticCredentials)
     {
         <text>
-                // Refresh every 5 minutes for static credentials to update rotation timers
-                location.reload();
+                    // Refresh every 5 minutes for static credentials to update rotation timers
+                    location.reload();
         </text>
     }
     else if (Model.AllLeases.Any(l => !l.IsExpired))
     {
         <text>
-                // Refresh every 30 seconds for dynamic credentials to update lease timers
-                location.reload();
+                    // Refresh every 30 seconds for dynamic credentials to update lease timers
+                    location.reload();
         </text>
     }
         }, @(Model.UseStaticCredentials ? "300000" : "30000")); // 5 minutes for static, 30 seconds for dynamic
@@ -571,6 +606,21 @@
             startAutoRefresh();
         }
     });
+
+        function togglePassword(inputId, button) {
+        const input = document.getElementById(inputId);
+        const icon = button.querySelector('i');
+
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+        } else {
+            input.type = 'password';
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+        }
+    }
 </script>
 
 <!-- Bootstrap 5 and FontAwesome for icons -->

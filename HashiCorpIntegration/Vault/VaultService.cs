@@ -99,6 +99,7 @@ public class VaultService(
                 ExpiresAt = cacheExpiry,
                 CreatedAt = DateTime.UtcNow,
                 Username = credentials.Data.Username,
+                Password = credentials.Data.Password,
                 IsCurrentlyUsed = true
             };
             _memoryCache.Set(LEASE_INFO_CACHE_KEY, leaseInfo, cacheOptions);

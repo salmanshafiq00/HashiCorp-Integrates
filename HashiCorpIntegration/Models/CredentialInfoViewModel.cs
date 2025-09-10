@@ -4,6 +4,7 @@ public class CredentialInfoViewModel
 {
     public bool Success { get; set; }
     public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
     public bool IsVaultGenerated { get; set; }
     public DateTime RetrievedAt { get; set; }
     public string? Error { get; set; }
