@@ -2,10 +2,10 @@
 using HashiCorpIntegration.Data;
 using HashiCorpIntegration.Vault;
 using Microsoft.EntityFrameworkCore;
-using HashiCorpIntegration.Models;
 using Microsoft.Extensions.Options;
+using HashiCorpIntegration.src.Models;
 
-namespace HashiCorpIntegration.Controllers;
+namespace HashiCorpIntegration.src.Controllers;
 
 public class TestVaultController(
     IVaultService vaultService,

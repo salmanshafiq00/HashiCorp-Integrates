@@ -1,4 +1,4 @@
-﻿using HashiCorpIntegration.Models;
+﻿using HashiCorpIntegration.src.Models;
 
 namespace HashiCorpIntegration.Vault;
 

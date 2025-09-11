@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using HashiCorpIntegration.Models;
+using HashiCorpIntegration.src.Models;
 using Microsoft.AspNetCore.Mvc;
 
-namespace HashiCorpIntegration.Controllers;
+namespace HashiCorpIntegration.src.Controllers;
 
 public class HomeController : Controller
 {

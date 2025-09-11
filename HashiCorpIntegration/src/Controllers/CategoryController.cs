@@ -3,7 +3,7 @@ using HashiCorpIntegration.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace HashiCorpIntegration.Controllers;
+namespace HashiCorpIntegration.src.Controllers;
 
 public class CategoryController(IApplicationDbContext context) : Controller
 {

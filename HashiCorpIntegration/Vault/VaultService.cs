@@ -1,4 +1,4 @@
-﻿using HashiCorpIntegration.Models;
+﻿using HashiCorpIntegration.src.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;

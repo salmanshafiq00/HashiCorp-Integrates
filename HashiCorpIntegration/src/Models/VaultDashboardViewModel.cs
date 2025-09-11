@@ -1,4 +1,4 @@
-﻿namespace HashiCorpIntegration.Models;
+﻿namespace HashiCorpIntegration.src.Models;
 
 // ViewModels
 public class VaultDashboardViewModel
