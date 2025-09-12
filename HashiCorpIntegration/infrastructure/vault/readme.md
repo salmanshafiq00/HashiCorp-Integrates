@@ -37,9 +37,16 @@ cd infrastructure/vault
 docker-compose up -d vault
 ```
 
+Option 2: Set a custom project name
+Run Compose with -p to set your own project name:
+
+```bash
+docker-compose -p hashcorp-vault up -d vault
+```
+
 ### 3. Initialize Vault (First Time Only)
 ```bash
-docker-compose up vault-init
+docker-compose -p hashcorp-vault up vault-init
 ```
 
 **IMPORTANT**: Save the output containing:

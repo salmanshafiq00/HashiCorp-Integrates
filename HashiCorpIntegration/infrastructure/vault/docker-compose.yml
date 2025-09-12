@@ -3,7 +3,7 @@ version: '3.8'
 services:
   vault:
     image: hashicorp/vault:latest
-    container_name: company-vault-persistent
+    container_name: vault-persistent
     restart: unless-stopped
     cap_add:
       - IPC_LOCK
@@ -20,7 +20,7 @@ services:
       - VAULT_LOG_LEVEL=INFO
     command: ["vault", "server", "-config=/vault/config/vault-config.hcl"]
     networks:
-      - company-network
+      - vault-network
     healthcheck:
       test: ["CMD-SHELL", "vault status || exit 0"]
       interval: 10s
@@ -44,17 +44,21 @@ services:
     working_dir: /scripts
     command: ["sh", "/scripts/master-init.sh"]
     networks:
-      - company-network
+      - vault-network
     restart: "no"
 
 volumes:
   vault-data:
+    name: vault-data
     driver: local
   vault-logs:
+    name: vault-logs
     driver: local
   vault-init-data:
+    name: vault-init-data
     driver: local
 
 networks:
-  company-network:
+  vault-network:
+    name: vault-network
     driver: bridge
