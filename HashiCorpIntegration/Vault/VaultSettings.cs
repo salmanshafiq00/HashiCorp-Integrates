@@ -14,6 +14,7 @@ public class VaultSettings
     public string UserId { get; set; } = string.Empty;
     public bool UseStaticCredentials { get; set; } = false;
 
+    // Database connection info
     public string DatabaseServer { get; set; } = string.Empty;
     public string DatabaseName { get; set; } = string.Empty;
     public int CacheExpirationMinutes { get; set; } = 30;
@@ -21,5 +22,6 @@ public class VaultSettings
     // Keep these for future AppRole setup
     public string RoleId { get; set; } = string.Empty;
     public string SecretId { get; set; } = string.Empty;
+    public bool UseAppRoleAuth { get; set; } = false;
     public string SqlSecretPath { get; set; } = string.Empty;
 }

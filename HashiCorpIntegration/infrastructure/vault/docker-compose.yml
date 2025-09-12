@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  vault:
+    image: hashicorp/vault:latest
+    container_name: company-vault-persistent
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    volumes:
+      - vault-data:/vault/data
+      - vault-logs:/vault/logs  
+      - vault-init-data:/vault-init
+      - ./vault-config.hcl:/vault/config/vault-config.hcl:ro
+    environment:
+      - VAULT_ADDR=http://0.0.0.0:8200
+      - VAULT_API_ADDR=http://0.0.0.0:8200
+      - VAULT_LOG_LEVEL=INFO
+    command: ["vault", "server", "-config=/vault/config/vault-config.hcl"]
+    networks:
+      - company-network
+    healthcheck:
+      test: ["CMD-SHELL", "vault status || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - ./init-scripts:/scripts:ro
+      - ./policies:/policies:ro
+      - vault-init-data:/vault-init
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_SKIP_VERIFY=true
+    working_dir: /scripts
+    command: ["sh", "/scripts/master-init.sh"]
+    networks:
+      - company-network
+    restart: "no"
+
+volumes:
+  vault-data:
+    driver: local
+  vault-logs:
+    driver: local
+  vault-init-data:
+    driver: local
+
+networks:
+  company-network:
+    driver: bridge
