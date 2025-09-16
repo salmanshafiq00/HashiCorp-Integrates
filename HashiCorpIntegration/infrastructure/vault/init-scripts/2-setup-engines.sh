@@ -1,4 +1,4 @@
-﻿# 2-setup-engines.sh
+# 2-setup-engines.sh
 #!/bin/bash
 set -e
 

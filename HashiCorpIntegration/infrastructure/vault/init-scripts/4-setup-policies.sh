@@ -1,4 +1,4 @@
-﻿# 4-setup-policies.sh
+# 4-setup-policies.sh
 #!/bin/bash
 set -e
 

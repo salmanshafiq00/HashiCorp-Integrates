@@ -1,4 +1,4 @@
-﻿# 5-setup-approles.sh
+# 5-setup-approles.sh
 #!/bin/bash
 set -e
 

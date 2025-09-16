@@ -13,7 +13,10 @@ services:
       - vault-data:/vault/data
       - vault-logs:/vault/logs  
       - vault-init-data:/vault-init
-      - ./vault-config.hcl:/vault/config/vault-config.hcl:ro
+      - type: bind
+        source: ./vault-config.hcl
+        target: /vault/config/vault-config.hcl
+        read_only: true
     environment:
       - VAULT_ADDR=http://0.0.0.0:8200
       - VAULT_API_ADDR=http://0.0.0.0:8200
@@ -21,28 +24,28 @@ services:
     command: ["vault", "server", "-config=/vault/config/vault-config.hcl"]
     networks:
       - vault-network
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8200/v1/sys/health?standbyok=true || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
   vault-init:
     image: hashicorp/vault:latest
     container_name: vault-init
     depends_on:
-      vault:
-        condition: service_healthy
+      - vault
     volumes:
-      - ./init-scripts:/scripts:ro
-      - ./policies:/policies:ro
+      - type: bind
+        source: ./init-scripts
+        target: /scripts
+        read_only: true
+      - type: bind
+        source: ./policies  
+        target: /policies
+        read_only: true
       - vault-init-data:/vault-init
     environment:
       - VAULT_ADDR=http://vault:8200
       - VAULT_SKIP_VERIFY=true
     working_dir: /scripts
-    command: ["sh", "/scripts/master-init.sh"]
+    # Use sh -c to handle potential line ending issues
+    command: ["sh", "-c", "dos2unix /scripts/*.sh 2>/dev/null || true; chmod +x /scripts/*.sh; sleep 15; sh /scripts/master-init.sh"]
     networks:
       - vault-network
     restart: "no"
