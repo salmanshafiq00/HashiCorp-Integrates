@@ -18,6 +18,7 @@ public class KvSecretViewModel
     public Dictionary<string, object> Data { get; set; } = [];
     public DateTime RetrievedAt { get; set; } = DateTime.UtcNow;
     public int KeyCount => Data.Count;
+
 }
 
 public class KvSecretDetailViewModel
@@ -27,6 +28,7 @@ public class KvSecretDetailViewModel
     public DateTime RetrievedAt { get; set; }
     public bool Success { get; set; }
     public string? Error { get; set; }
+
 }
 
 public class KvCreateUpdateViewModel
@@ -36,6 +38,7 @@ public class KvCreateUpdateViewModel
     public bool IsUpdate { get; set; }
     public bool Success { get; set; }
     public string? Error { get; set; }
+
 }
 
 public class KvKeyValuePair
@@ -47,11 +50,12 @@ public class KvKeyValuePair
 
 public class KvTestViewModel
 {
-    public string TestPath { get; set; } = "kv/myapp/config";
-    public string TestKey { get; set; } = "database_connection";
+    public string TestPath { get; set; } 
+    public string TestKey { get; set; } 
     public string? RetrievedValue { get; set; }
     public bool Success { get; set; }
     public string? Error { get; set; }
     public DateTime TestExecutedAt { get; set; }
     public TimeSpan ResponseTime { get; set; }
+
 }

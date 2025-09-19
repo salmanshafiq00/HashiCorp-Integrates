@@ -44,8 +44,11 @@ public class TestKvController(
     {
         if (string.IsNullOrEmpty(path))
         {
-            // Load some common paths if no specific path is provided
-            var commonPaths = new[] { "kv/myapp/config", "kv/myapp/environments/dev", "kv/myapp/environments/prod" };
+            var commonPaths = new[] {
+                "hashicorp-integration/config",
+                "hashicorp-integration/environments/dev",
+                "hashicorp-integration/environments/prod"
+            };
 
             foreach (var commonPath in commonPaths)
             {
@@ -90,8 +93,8 @@ public class TestKvController(
     {
         try
         {
-            // Test by trying to read a simple secret
-            var testSecret = await vaultService.GetSecretAsync("kv/myapp/config", "api_key");
+            // Updated to use the correct path from setup script
+            var testSecret = await vaultService.GetSecretAsync("hashicorp-integration/config", "api_key");
             model.VaultConnectionSuccess = !string.IsNullOrEmpty(testSecret);
         }
         catch (Exception ex)
@@ -342,11 +345,17 @@ public class TestKvController(
 
     public async Task<IActionResult> TestKv()
     {
-        var model = new KvTestViewModel();
+        var model = new KvTestViewModel
+        {
+            TestPath = "hashicorp-integration/config", 
+            TestKey = "api_key"
+        };
+
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
+            // Updated to use the correct path from setup script
             var value = await vaultService.GetSecretAsync(model.TestPath, model.TestKey);
             stopwatch.Stop();
 
@@ -383,8 +392,8 @@ public class TestKvController(
 
         try
         {
-            // Test basic KV operations
-            var testSecrets = await vaultService.GetAllSecretsAsync("kv/myapp/config");
+            // Updated to use the correct path from setup script
+            var testSecrets = await vaultService.GetAllSecretsAsync("hashicorp-integration/config");
 
             health = health with
             {
@@ -394,7 +403,7 @@ public class TestKvController(
                     details = new
                     {
                         secretCount = testSecrets.Count,
-                        testPath = "kv/myapp/config",
+                        testPath = "hashicorp-integration/config",
                         cacheStatus = "active"
                     }
                 }
@@ -406,5 +415,138 @@ public class TestKvController(
         }
 
         return Json(health);
+    }
+
+    // Additional KV management endpoints
+
+    [HttpGet]
+    public async Task<IActionResult> SecretHistory(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            var metadata = await vaultService.GetSecretMetadataAsync(path);
+            ViewBag.Path = path;
+            ViewBag.Metadata = metadata;
+            return View(metadata);
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to load secret history: {ex.Message}";
+            return RedirectToAction(nameof(SecretDetail), new { path });
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> SecretVersion(string path, int version)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            var secrets = await vaultService.GetSecretVersionAsync(path, version);
+            var model = new KvSecretDetailViewModel
+            {
+                Path = path,
+                Data = secrets,
+                Success = true,
+                RetrievedAt = DateTime.UtcNow
+            };
+            ViewBag.Version = version;
+            return View("SecretDetail", model);
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to load secret version {version}: {ex.Message}";
+            return RedirectToAction(nameof(SecretDetail), new { path });
+        }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> UndeleteSecret(string path, int version)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            var success = await vaultService.UndeleteSecretAsync(path, version);
+            if (success)
+            {
+                TempData["Success"] = $"Secret version {version} undeleted successfully";
+            }
+            else
+            {
+                TempData["Error"] = $"Failed to undelete secret version {version}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to undelete secret version {version}: {ex.Message}";
+            logger.LogError(ex, "Failed to undelete secret version {Version} at path: {Path}", version, path);
+        }
+
+        return RedirectToAction(nameof(SecretDetail), new { path });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> DestroySecret(string path, int version)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            var success = await vaultService.DestroySecretAsync(path, version);
+            if (success)
+            {
+                TempData["Success"] = $"Secret version {version} destroyed permanently";
+            }
+            else
+            {
+                TempData["Error"] = $"Failed to destroy secret version {version}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to destroy secret version {version}: {ex.Message}";
+            logger.LogError(ex, "Failed to destroy secret version {Version} at path: {Path}", version, path);
+        }
+
+        return RedirectToAction(nameof(SecretDetail), new { path });
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> SecretExists(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return Json(new { exists = false, error = "Path is required" });
+        }
+
+        try
+        {
+            var exists = await vaultService.SecretExistsAsync(path);
+            return Json(new { exists, path });
+        }
+        catch (Exception ex)
+        {
+            return Json(new { exists = false, error = ex.Message, path });
+        }
     }
 }

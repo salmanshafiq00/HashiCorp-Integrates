@@ -18,6 +18,7 @@ builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =
     var vaultService = serviceProvider.GetRequiredService<IVaultService>();
     var logger = serviceProvider.GetRequiredService<ILogger<ApplicationDbContext>>();
     var connectionString = GetConnectionStringWithRetry(vaultService, logger);
+    //var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     options.UseSqlServer(connectionString, sqlOptions =>
     {
         // Add connection resiliency

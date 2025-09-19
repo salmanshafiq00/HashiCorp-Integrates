@@ -45,7 +45,7 @@ public class VaultService(
         return _vaultClient;
     }
 
-    #region Dynamic Credentials (existing methods)
+    #region Dynamic Credentials
 
     public async Task<string> GetSqlConnectionStringAsync()
     {
@@ -240,7 +240,7 @@ public class VaultService(
 
     #endregion
 
-    #region Static Credentials (new methods)
+    #region Static Credentials 
 
     public async Task<string> GetStaticConnectionStringAsync()
     {
@@ -419,14 +419,14 @@ public class VaultService(
             var listPath = string.IsNullOrEmpty(basePath) ? "" : $"{basePath}/";
             var result = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretPathsAsync(listPath);
 
-            var paths = result?.Data?.Keys?.ToList() ?? new List<string>();
+            var paths = result?.Data?.Keys?.ToList() ?? [];
             logger.LogInformation("Found {Count} secret paths under: {BasePath}", paths.Count, basePath);
             return paths;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to list secret paths from: {BasePath}", basePath);
-            return new List<string>();
+            return [];
         }
     }
 
@@ -463,7 +463,7 @@ public class VaultService(
             catch
             {
                 // If path doesn't exist, start with empty dictionary
-                existingSecrets = new Dictionary<string, object>();
+                existingSecrets = [];
             }
 
             // Update or add the key
@@ -545,6 +545,98 @@ public class VaultService(
             var specificCacheKey = $"vault_secret_{path}";
             _memoryCache.Remove(specificCacheKey);
             logger.LogInformation("KV cache invalidated for path: {Path}", path);
+        }
+    }
+
+    public async Task<bool> SecretExistsAsync(string path)
+    {
+        try
+        {
+            var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
+            return secret?.Data?.Data != null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<Dictionary<string, object>> GetSecretMetadataAsync(string path)
+    {
+        try
+        {
+            var metadata = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretMetadataAsync(path);
+            return new Dictionary<string, object>
+            {
+                {"created_time", metadata.Data.CreatedTime},
+                {"updated_time", metadata.Data.UpdatedTime},
+                {"current_version", metadata.Data.CurrentVersion},
+                {"max_versions", metadata.Data.MaxVersion},
+                {"versions", metadata.Data.Versions}
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get metadata for path: {Path}", path);
+            throw;
+        }
+    }
+
+    public async Task<Dictionary<string, object>> GetSecretVersionAsync(string path, int version)
+    {
+        try
+        {
+            var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path, version);
+            if (secret?.Data?.Data != null)
+            {
+                return new Dictionary<string, object>(secret.Data.Data);
+            }
+            throw new InvalidOperationException($"No secrets found in path '{path}' version {version}");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to retrieve secret version {Version} from path: {Path}", version, path);
+            throw;
+        }
+    }
+
+    public async Task<bool> UndeleteSecretAsync(string path, int version)
+    {
+        try
+        {
+            await GetVaultClient().V1.Secrets.KeyValue.V2.UndeleteSecretVersionsAsync(path, [version]);
+
+            // Invalidate cache
+            var cacheKey = $"vault_secrets_{path}";
+            _memoryCache.Remove(cacheKey);
+
+            logger.LogInformation("Successfully undeleted secret version {Version} at path: {Path}", version, path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to undelete secret version {Version} at path: {Path}", version, path);
+            return false;
+        }
+    }
+
+    public async Task<bool> DestroySecretAsync(string path, int version)
+    {
+        try
+        {
+            await GetVaultClient().V1.Secrets.KeyValue.V2.DestroySecretVersionsAsync(path, [ version]);
+
+            // Invalidate cache
+            var cacheKey = $"vault_secrets_{path}";
+            _memoryCache.Remove(cacheKey);
+
+            logger.LogInformation("Successfully destroyed secret version {Version} at path: {Path}", version, path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to destroy secret version {Version} at path: {Path}", version, path);
+            return false;
         }
     }
 

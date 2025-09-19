@@ -28,6 +28,11 @@ public interface IVaultService
     Task<bool> DeleteSecretAsync(string path);
     Task<bool> DeleteSecretKeyAsync(string path, string key);
     void InvalidateKvCache(string path = null);
+    Task<bool> SecretExistsAsync(string path);
+    Task<Dictionary<string, object>> GetSecretMetadataAsync(string path);
+    Task<Dictionary<string, object>> GetSecretVersionAsync(string path, int version);
+    Task<bool> UndeleteSecretAsync(string path, int version);
+    Task<bool> DestroySecretAsync(string path, int version);
 
     // Common methods
     Task<string> GetSecretAsync(string path, string key);
