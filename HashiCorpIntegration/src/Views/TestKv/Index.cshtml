@@ -1,0 +1,315 @@
+﻿@using HashiCorpIntegration.src.Models
+@model KvDashboardViewModel
+@{
+    ViewData["Title"] = "KV Secrets Dashboard";
+}
+
+<div class="container-fluid mt-4">
+    <h2 class="mb-4">
+        <i class="fas fa-key"></i> KV Secrets Management
+        <span class="badge bg-primary ms-2">Key-Value Store</span>
+    </h2>
+
+    <!-- Alert Messages -->
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="fas fa-check-circle"></i> @TempData["Success"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    }
+
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-circle"></i> @TempData["Error"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <div class="alert alert-warning" role="alert">
+            <i class="fas fa-exclamation-triangle"></i> @Model.Error
+        </div>
+    }
+
+    <div class="row mb-4">
+        <!-- Vault Connection Status -->
+        <div class="col-lg-6 mb-4">
+            <div class="card border-success">
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-link"></i> Vault KV Connection Status
+                    </h5>
+                </div>
+                <div class="card-body">
+                    @if (Model.VaultConnectionSuccess)
+                    {
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i>
+                            <strong>Connected Successfully</strong>
+                            <small class="d-block">KV secrets engine is accessible</small>
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(Model.VaultError))
+                    {
+                        <div class="alert alert-danger">
+                            <i class="fas fa-times-circle"></i>
+                            <strong>Connection Failed</strong>
+                        </div>
+                        <small class="text-muted">@Model.VaultError</small>
+                    }
+                    else
+                    {
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-question-circle fa-2x"></i>
+                            <p class="mt-2">Connection status unknown</p>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="col-lg-6 mb-4">
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-chart-bar"></i> Quick Stats
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-6 text-center">
+                            <h4 class="text-primary">@Model.Secrets.Count</h4>
+                            <small class="text-muted">Secret Paths</small>
+                        </div>
+                        <div class="col-6 text-center">
+                            <h4 class="text-primary">@Model.Secrets.Sum(s => s.KeyCount)</h4>
+                            <small class="text-muted">Total Keys</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions Row -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-cogs"></i> Actions
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="btn-group" role="group">
+                        <a href="@Url.Action("CreateSecret")" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Create New Secret
+                        </a>
+
+                        <form asp-action="InvalidateCache" method="post" class="d-inline">
+                            <button type="submit" class="btn btn-warning"
+                                    title="Clear all KV cache">
+                                <i class="fas fa-trash"></i> Clear Cache
+                            </button>
+                        </form>
+
+                        <a href="@Url.Action("TestKv")" class="btn btn-success"
+                           title="Test KV secret retrieval">
+                            <i class="fas fa-play"></i> Test KV
+                        </a>
+
+                        <a href="@Url.Action("HealthCheck")" class="btn btn-outline-primary" target="_blank"
+                           title="View KV health status in JSON format">
+                            <i class="fas fa-heartbeat"></i> Health Check (JSON)
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Path Display -->
+    @if (!string.IsNullOrEmpty(Model.CurrentPath))
+    {
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="alert alert-info">
+                    <i class="fas fa-folder-open"></i>
+                    <strong>Current Path:</strong> @Model.CurrentPath
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Secrets Display -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-list"></i> Secrets (@Model.Secrets.Count)
+                    </h5>
+                </div>
+                <div class="card-body">
+                    @if (Model.Secrets.Any())
+                    {
+                        <div class="row">
+                            @foreach (var secret in Model.Secrets)
+                            {
+                                <div class="col-lg-6 col-xl-4 mb-4">
+                                    <div class="card border-secondary">
+                                        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="mb-0">
+                                                    <i class="fas fa-key"></i> @secret.Path
+                                                </h6>
+                                                <small class="text-light">@secret.KeyCount keys</small>
+                                            </div>
+                                            <div class="dropdown">
+                                                <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                                    <i class="fas fa-ellipsis-v"></i>
+                                                </button>
+                                                <ul class="dropdown-menu">
+                                                    <li>
+                                                        <a class="dropdown-item" href="@Url.Action("SecretDetail", new { path = secret.Path })">
+                                                            <i class="fas fa-eye"></i> View Details
+                                                        </a>
+                                                    </li>
+                                                    <li>
+                                                        <a class="dropdown-item" href="@Url.Action("UpdateSecret", new { path = secret.Path })">
+                                                            <i class="fas fa-edit"></i> Edit
+                                                        </a>
+                                                    </li>
+                                                    <li><hr class="dropdown-divider"></li>
+                                                    <li>
+                                                        <form asp-action="DeleteSecret" method="post" class="d-inline"
+                                                              onsubmit="return confirm('Are you sure you want to delete this secret?')">
+                                                            <input type="hidden" name="path" value="@secret.Path" />
+                                                            <button type="submit" class="dropdown-item text-danger">
+                                                                <i class="fas fa-trash"></i> Delete
+                                                            </button>
+                                                        </form>
+                                                    </li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <small class="text-muted">
+                                                    <i class="fas fa-clock"></i> Retrieved: @secret.RetrievedAt.ToString("MM/dd HH:mm:ss")
+                                                </small>
+                                            </div>
+
+                                            @if (secret.Data.Any())
+                                            {
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-borderless">
+                                                        <tbody>
+                                                            @foreach (var kvp in secret.Data.Take(3))
+                                                            {
+                                                                <tr>
+                                                                    <td class="fw-bold text-truncate" style="max-width: 100px;">@kvp.Key</td>
+                                                                    <td class="text-muted small text-truncate" style="max-width: 150px;">
+                                                                        @(kvp.Value?.ToString()?.Length > 30 ?
+                                                                            kvp.Value.ToString().Substring(0, 30) + "..." :
+                                                                            kvp.Value?.ToString())
+                                                                    </td>
+                                                                </tr>
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+
+                                                @if (secret.Data.Count > 3)
+                                                {
+                                                    <small class="text-muted">... and @(secret.Data.Count - 3) more keys</small>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <div class="text-center text-muted py-2">
+                                                    <i class="fas fa-inbox"></i>
+                                                    <p class="small mb-0">No keys found</p>
+                                                </div>
+                                            }
+                                        </div>
+                                        <div class="card-footer text-center">
+                                            <div class="btn-group btn-group-sm" role="group">
+                                                <a href="@Url.Action("SecretDetail", new { path = secret.Path })" class="btn btn-outline-primary">
+                                                    <i class="fas fa-eye"></i> View
+                                                </a>
+                                                <a href="@Url.Action("UpdateSecret", new { path = secret.Path })" class="btn btn-outline-secondary">
+                                                    <i class="fas fa-edit"></i> Edit
+                                                </a>
+                                                <form asp-action="InvalidateCache" method="post" class="d-inline">
+                                                    <input type="hidden" name="path" value="@secret.Path" />
+                                                    <button type="submit" class="btn btn-outline-warning">
+                                                        <i class="fas fa-refresh"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-key fa-3x"></i>
+                            <p class="mt-3 mb-4">No secrets found</p>
+                            @if (!string.IsNullOrEmpty(Model.CurrentPath))
+                            {
+                                <p class="text-muted">No secrets found in path: <code>@Model.CurrentPath</code></p>
+                            }
+                            <a href="@Url.Action("CreateSecret")" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Create First Secret
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Secret Paths (if any) -->
+    @if (Model.SecretPaths.Any())
+    {
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-folder"></i> Available Paths (@Model.SecretPaths.Count)
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            @foreach (var path in Model.SecretPaths)
+                            {
+                                <div class="col-md-6 col-lg-4 mb-2">
+                                    <div class="d-flex align-items-center">
+                                        <i class="fas fa-folder-open text-primary me-2"></i>
+                                        <a href="@Url.Action("Index", new { path })" class="text-decoration-none">
+                                            @path
+                                        </a>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Bootstrap 5 and FontAwesome for icons -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>

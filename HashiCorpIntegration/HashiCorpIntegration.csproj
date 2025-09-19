@@ -16,4 +16,8 @@
     <PackageReference Include="VaultSharp" Version="1.17.5.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Views\" />
+  </ItemGroup>
+
 </Project>

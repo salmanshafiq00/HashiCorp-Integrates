@@ -371,6 +371,185 @@ public class VaultService(
 
     #endregion
 
+    // Add these methods to your existing VaultService class
+
+    #region KV Secret Management
+
+    public async Task<Dictionary<string, object>> GetAllSecretsAsync(string path)
+    {
+        var cacheKey = $"vault_secrets_{path}";
+
+        if (_memoryCache.TryGetValue(cacheKey, out Dictionary<string, object>? cachedSecrets) &&
+            cachedSecrets != null)
+        {
+            logger.LogDebug("Using cached secrets for path: {Path}", path);
+            return cachedSecrets;
+        }
+
+        try
+        {
+            var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
+            if (secret?.Data?.Data != null)
+            {
+                var secrets = new Dictionary<string, object>(secret.Data.Data);
+
+                var cacheOptions = new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_vaultSettings.CacheExpirationMinutes),
+                    Priority = CacheItemPriority.Normal
+                };
+
+                _memoryCache.Set(cacheKey, secrets, cacheOptions);
+                logger.LogInformation("Retrieved {Count} secrets from path: {Path}", secrets.Count, path);
+                return secrets;
+            }
+            throw new InvalidOperationException($"No secrets found in path '{path}'");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to retrieve secrets from Vault path: {Path}", path);
+            throw;
+        }
+    }
+
+    public async Task<List<string>> ListSecretPathsAsync(string basePath = "")
+    {
+        try
+        {
+            var listPath = string.IsNullOrEmpty(basePath) ? "" : $"{basePath}/";
+            var result = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretPathsAsync(listPath);
+
+            var paths = result?.Data?.Keys?.ToList() ?? new List<string>();
+            logger.LogInformation("Found {Count} secret paths under: {BasePath}", paths.Count, basePath);
+            return paths;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list secret paths from: {BasePath}", basePath);
+            return new List<string>();
+        }
+    }
+
+    public async Task<bool> CreateOrUpdateSecretAsync(string path, Dictionary<string, object> secrets)
+    {
+        try
+        {
+            await GetVaultClient().V1.Secrets.KeyValue.V2.WriteSecretAsync(path, secrets);
+
+            // Invalidate cache for this path
+            var cacheKey = $"vault_secrets_{path}";
+            _memoryCache.Remove(cacheKey);
+
+            logger.LogInformation("Successfully created/updated secret at path: {Path}", path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to create/update secret at path: {Path}", path);
+            return false;
+        }
+    }
+
+    public async Task<bool> CreateOrUpdateSecretKeyAsync(string path, string key, object value)
+    {
+        try
+        {
+            // Get existing secrets first
+            Dictionary<string, object> existingSecrets;
+            try
+            {
+                existingSecrets = await GetAllSecretsAsync(path);
+            }
+            catch
+            {
+                // If path doesn't exist, start with empty dictionary
+                existingSecrets = new Dictionary<string, object>();
+            }
+
+            // Update or add the key
+            existingSecrets[key] = value;
+
+            // Write back to Vault
+            return await CreateOrUpdateSecretAsync(path, existingSecrets);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to create/update secret key {Key} at path: {Path}", key, path);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeleteSecretAsync(string path)
+    {
+        try
+        {
+            await GetVaultClient().V1.Secrets.KeyValue.V2.DeleteSecretAsync(path);
+
+            // Invalidate cache
+            var cacheKey = $"vault_secrets_{path}";
+            _memoryCache.Remove(cacheKey);
+
+            logger.LogInformation("Successfully deleted secret at path: {Path}", path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to delete secret at path: {Path}", path);
+            return false;
+        }
+    }
+
+    public async Task<bool> DeleteSecretKeyAsync(string path, string key)
+    {
+        try
+        {
+            var existingSecrets = await GetAllSecretsAsync(path);
+
+            if (existingSecrets.ContainsKey(key))
+            {
+                existingSecrets.Remove(key);
+
+                if (existingSecrets.Any())
+                {
+                    // Update with remaining keys
+                    return await CreateOrUpdateSecretAsync(path, existingSecrets);
+                }
+                else
+                {
+                    // Delete entire secret if no keys remain
+                    return await DeleteSecretAsync(path);
+                }
+            }
+
+            logger.LogWarning("Secret key {Key} not found at path: {Path}", key, path);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to delete secret key {Key} at path: {Path}", key, path);
+            return false;
+        }
+    }
+
+    public void InvalidateKvCache(string path = null)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            // This is a simple approach - in production you might want a more sophisticated cache invalidation
+            logger.LogInformation("KV cache invalidation requested for all paths");
+        }
+        else
+        {
+            var cacheKey = $"vault_secrets_{path}";
+            _memoryCache.Remove(cacheKey);
+            var specificCacheKey = $"vault_secret_{path}";
+            _memoryCache.Remove(specificCacheKey);
+            logger.LogInformation("KV cache invalidated for path: {Path}", path);
+        }
+    }
+
+    #endregion
+
     #region Common Methods
 
     public async Task<string> GetSecretAsync(string path, string key)

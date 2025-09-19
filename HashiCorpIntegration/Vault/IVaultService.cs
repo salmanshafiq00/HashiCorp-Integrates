@@ -20,6 +20,15 @@ public interface IVaultService
     Task<RotationInfo> RotateStaticCredentialsAsync();
     void InvalidateStaticConnectionCache();
 
+    // KV Secret Management
+    Task<Dictionary<string, object>> GetAllSecretsAsync(string path);
+    Task<List<string>> ListSecretPathsAsync(string basePath = "");
+    Task<bool> CreateOrUpdateSecretAsync(string path, Dictionary<string, object> secrets);
+    Task<bool> CreateOrUpdateSecretKeyAsync(string path, string key, object value);
+    Task<bool> DeleteSecretAsync(string path);
+    Task<bool> DeleteSecretKeyAsync(string path, string key);
+    void InvalidateKvCache(string path = null);
+
     // Common methods
     Task<string> GetSecretAsync(string path, string key);
     Task<Dictionary<string, object>> GetSecretAsync(string path);

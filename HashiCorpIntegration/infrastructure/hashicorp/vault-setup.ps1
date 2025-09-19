@@ -1,0 +1,191 @@
+# vault-setup-hashicorp-integration.ps1 - Setup for HashiCorpIntegration database
+
+Write-Host "Setting up HashiCorp Vault for HashiCorpIntegration database..." -ForegroundColor Green
+
+# Set Vault environment variables
+$env:VAULT_ADDR = "http://127.0.0.1:8200"
+$env:VAULT_TOKEN = "ISHw8d2gDei24Q0IOex4fMIciBLP3gFRs55pwCPi0RuJf6fXy7qxqhPTfqdMXwXV"
+
+# Wait for Vault to be ready
+Write-Host "Waiting for Vault to be ready..." -ForegroundColor Yellow
+do {
+    Start-Sleep -Seconds 2
+    $vaultStatus = docker exec hashicorp_vault vault status 2>$null
+} while ($LASTEXITCODE -ne 0)
+
+Write-Host "Vault is ready! Configuring..." -ForegroundColor Green
+
+# Login to Vault:
+Write-Host "Authenticating with Vault..." -ForegroundColor Yellow
+docker exec hashicorp_vault vault login ISHw8d2gDei24Q0IOex4fMIciBLP3gFRs55pwCPi0RuJf6fXy7qxqhPTfqdMXwXV
+
+# Wait for SQL Server to be ready and create your database
+Write-Host "Waiting for SQL Server to be ready..." -ForegroundColor Yellow
+do {
+    Start-Sleep -Seconds 3
+    $sqlReady = docker exec vault_sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "VaultTest123!" -Q "SELECT 1" 2>$null
+} while ($LASTEXITCODE -ne 0)
+
+# Create HashiCorpIntegration database
+Write-Host "Creating HashiCorpIntegration database..." -ForegroundColor Cyan
+docker exec vault_sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "VaultTest123!" -Q "
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'HashiCorpIntegration')
+BEGIN
+    CREATE DATABASE [HashiCorpIntegration];
+    PRINT 'HashiCorpIntegration database created successfully';
+END
+ELSE
+BEGIN
+    PRINT 'HashiCorpIntegration database already exists';
+END
+"
+
+# 1. Enable KV v2 secrets engine
+Write-Host "`n1. Enabling KV v2 secrets engine..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault secrets enable -path=kv kv-v2
+
+# 2. Enable Database secrets engine
+Write-Host "`n2. Enabling database secrets engine..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault secrets enable database
+
+# 3. Configure SQL Server database connection for HashiCorpIntegration
+Write-Host "`n3. Configuring HashiCorpIntegration database connection..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault write database/config/hashicorp-integration `
+    plugin_name=mssql-database-plugin `
+    connection_url="sqlserver://sa:VaultTest123!@vault_sqlserver:1434?database=HashiCorpIntegration" `
+    allowed_roles="app-role,app-static-role,readonly-role"
+
+# 4. Create dynamic database role
+Write-Host "`n4. Creating dynamic database role..." -ForegroundColor Cyan
+$creationSQL = @"
+USE [HashiCorpIntegration];
+CREATE LOGIN [{{name}}] WITH PASSWORD = '{{password}}';
+CREATE USER [{{name}}] FOR LOGIN [{{name}}];
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO [{{name}}];
+GRANT EXECUTE ON SCHEMA::dbo TO [{{name}}];
+"@
+
+$revocationSQL = @"
+USE [HashiCorpIntegration];
+DROP USER [{{name}}];
+USE [master];
+DROP LOGIN [{{name}}];
+"@
+
+docker exec hashicorp_vault vault write database/roles/app-role `
+    db_name=hashicorp-integration `
+    creation_statements="$creationSQL" `
+    revocation_statements="$revocationSQL" `
+    default_ttl="1h" `
+    max_ttl="24h"
+
+# 5. Create static database user first
+Write-Host "`n5. Creating static database user..." -ForegroundColor Cyan
+docker exec vault_sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "VaultTest123!" -Q "
+USE [HashiCorpIntegration];
+IF NOT EXISTS (SELECT * FROM sys.sql_logins WHERE name = 'vault_static_user')
+BEGIN
+    CREATE LOGIN [vault_static_user] WITH PASSWORD = 'StaticPass123!';
+    PRINT 'Created login vault_static_user';
+END
+
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'vault_static_user')
+BEGIN
+    CREATE USER [vault_static_user] FOR LOGIN [vault_static_user];
+    GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::dbo TO [vault_static_user];
+    GRANT EXECUTE ON SCHEMA::dbo TO [vault_static_user];
+    PRINT 'Created user vault_static_user and granted permissions';
+END
+"
+
+# 6. Create static database role in Vault
+Write-Host "`n6. Creating static database role..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault write database/static-roles/app-static-role `
+    db_name=hashicorp-integration `
+    username="vault_static_user" `
+    rotation_period="24h"
+
+# 7. Create sample KV secrets for your application
+Write-Host "`n7. Creating sample KV secrets..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault kv put kv/hashicorp-integration/config `
+    database_connection="Server=localhost;Database=HashiCorpIntegration;Integrated Security=false;" `
+    api_key="your-api-key-here" `
+    jwt_secret="your-jwt-secret-here" `
+    encryption_key="your-encryption-key-here"
+
+docker exec hashicorp_vault vault kv put kv/hashicorp-integration/environments/dev `
+    environment="Development" `
+    debug="true" `
+    log_level="Debug" `
+    external_api_url="https://api-dev.example.com"
+
+docker exec hashicorp_vault vault kv put kv/hashicorp-integration/environments/prod `
+    environment="Production" `
+    debug="false" `
+    log_level="Warning" `
+    external_api_url="https://api.example.com"
+
+# 8. Enable AppRole auth method
+Write-Host "`n8. Enabling AppRole authentication..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault auth enable approle
+
+# 9. Create policy for your application
+Write-Host "`n9. Creating application policy..." -ForegroundColor Cyan
+$policyContent = @"
+# Policy for HashiCorp Integration Application
+path "kv/data/hashicorp-integration/*" {
+  capabilities = ["read", "list"]
+}
+
+path "database/creds/app-role" {
+  capabilities = ["read"]
+}
+
+path "database/static-creds/app-static-role" {
+  capabilities = ["read"]
+}
+
+path "auth/token/lookup-self" {
+  capabilities = ["read"]
+}
+"@
+
+$policyContent | Out-File -FilePath "integration-app-policy.hcl" -Encoding UTF8
+docker cp integration-app-policy.hcl hashicorp_vault:/tmp/integration-app-policy.hcl
+docker exec hashicorp_vault vault policy write hashicorp-integration-app /tmp/integration-app-policy.hcl
+Remove-Item "integration-app-policy.hcl"
+
+# 10. Create AppRole
+Write-Host "`n10. Creating AppRole..." -ForegroundColor Cyan
+docker exec hashicorp_vault vault write auth/approle/role/hashicorp-integration-app `
+    token_policies="hashicorp-integration-app" `
+    token_ttl=1h `
+    token_max_ttl=4h
+
+# 11. Get AppRole credentials
+Write-Host "`n11. Getting AppRole credentials..." -ForegroundColor Cyan
+$roleId = docker exec hashicorp_vault vault read -field=role_id auth/approle/role/hashicorp-integration-app/role-id
+$secretId = docker exec hashicorp_vault vault write -field=secret_id -f auth/approle/role/hashicorp-integration-app/secret-id
+
+Write-Host "`n=== SETUP COMPLETE ===" -ForegroundColor Green
+Write-Host "`nVault UI: http://localhost:8200" -ForegroundColor White
+Write-Host "Root Token: ISHw8d2gDei24Q0IOex4fMIciBLP3gFRs55pwCPi0RuJf6fXy7qxqhPTfqdMXwXV" -ForegroundColor White
+Write-Host "`nDatabase: HashiCorpIntegration" -ForegroundColor Yellow
+Write-Host "SA Password: VaultTest123!" -ForegroundColor White
+Write-Host "`nAppRole Credentials:" -ForegroundColor Yellow
+Write-Host "Role ID: $roleId" -ForegroundColor White
+Write-Host "Secret ID: $secretId" -ForegroundColor White
+
+Write-Host "`n=== CONNECTION STRINGS FOR MIGRATIONS ===" -ForegroundColor Magenta
+Write-Host "DefaultConnection (for migrations):" -ForegroundColor Gray
+Write-Host "Server=localhost,1434;Database=HashiCorpIntegration;User Id=sa;Password=VaultTest123!;TrustServerCertificate=True;MultipleActiveResultSets=true;Connection Timeout=30;Encrypt=false" -ForegroundColor White
+
+Write-Host "`n=== QUICK TEST COMMANDS ===" -ForegroundColor Magenta
+Write-Host "# Test dynamic credentials:" -ForegroundColor Gray
+Write-Host "docker exec hashicorp_vault vault read database/creds/app-role" -ForegroundColor White
+
+Write-Host "`n# Test static credentials:" -ForegroundColor Gray
+Write-Host "docker exec hashicorp_vault vault read database/static-creds/app-static-role" -ForegroundColor White
+
+Write-Host "`n# Test KV secrets:" -ForegroundColor Gray
+Write-Host "docker exec hashicorp_vault vault kv get kv/hashicorp-integration/config" -ForegroundColor White

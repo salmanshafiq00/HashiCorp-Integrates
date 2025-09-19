@@ -1,0 +1,410 @@
+﻿using Microsoft.AspNetCore.Mvc;
+using HashiCorpIntegration.Vault;
+using Microsoft.Extensions.Options;
+using HashiCorpIntegration.src.Models;
+using System.Diagnostics;
+
+namespace HashiCorpIntegration.src.Controllers;
+
+public class TestKvController(
+    IVaultService vaultService,
+    IOptions<VaultSettings> vaultSettings,
+    ILogger<TestKvController> logger) : Controller
+{
+    private readonly VaultSettings _vaultSettings = vaultSettings.Value;
+
+    public async Task<IActionResult> Index(string path = "")
+    {
+        var model = new KvDashboardViewModel
+        {
+            CurrentPath = path
+        };
+
+        await LoadSecretPaths(model, path);
+        await LoadSecrets(model, path);
+        await TestVaultConnection(model);
+
+        return View(model);
+    }
+
+    private async Task LoadSecretPaths(KvDashboardViewModel model, string basePath)
+    {
+        try
+        {
+            model.SecretPaths = await vaultService.ListSecretPathsAsync(basePath);
+        }
+        catch (Exception ex)
+        {
+            model.Error = $"Failed to load secret paths: {ex.Message}";
+            logger.LogError(ex, "Failed to load secret paths from: {BasePath}", basePath);
+        }
+    }
+
+    private async Task LoadSecrets(KvDashboardViewModel model, string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            // Load some common paths if no specific path is provided
+            var commonPaths = new[] { "kv/myapp/config", "kv/myapp/environments/dev", "kv/myapp/environments/prod" };
+
+            foreach (var commonPath in commonPaths)
+            {
+                try
+                {
+                    var secrets = await vaultService.GetAllSecretsAsync(commonPath);
+                    model.Secrets.Add(new KvSecretViewModel
+                    {
+                        Path = commonPath,
+                        Data = secrets,
+                        RetrievedAt = DateTime.UtcNow
+                    });
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to load secrets from common path: {Path}", commonPath);
+                    // Continue with other paths
+                }
+            }
+        }
+        else
+        {
+            try
+            {
+                var secrets = await vaultService.GetAllSecretsAsync(path);
+                model.Secrets.Add(new KvSecretViewModel
+                {
+                    Path = path,
+                    Data = secrets,
+                    RetrievedAt = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                model.Error = $"Failed to load secrets from path '{path}': {ex.Message}";
+                logger.LogError(ex, "Failed to load secrets from path: {Path}", path);
+            }
+        }
+    }
+
+    private async Task TestVaultConnection(KvDashboardViewModel model)
+    {
+        try
+        {
+            // Test by trying to read a simple secret
+            var testSecret = await vaultService.GetSecretAsync("kv/myapp/config", "api_key");
+            model.VaultConnectionSuccess = !string.IsNullOrEmpty(testSecret);
+        }
+        catch (Exception ex)
+        {
+            model.VaultConnectionSuccess = false;
+            model.VaultError = ex.Message;
+            logger.LogError(ex, "Vault connection test failed");
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> SecretDetail(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        var model = new KvSecretDetailViewModel { Path = path };
+
+        try
+        {
+            model.Data = await vaultService.GetAllSecretsAsync(path);
+            model.Success = true;
+            model.RetrievedAt = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            model.Success = false;
+            model.Error = ex.Message;
+            logger.LogError(ex, "Failed to load secret detail for path: {Path}", path);
+        }
+
+        return View(model);
+    }
+
+    [HttpGet]
+    public IActionResult CreateSecret(string path = "")
+    {
+        var model = new KvCreateUpdateViewModel
+        {
+            Path = path,
+            IsUpdate = false
+        };
+
+        return View(model);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> CreateSecret(KvCreateUpdateViewModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.Path))
+        {
+            ModelState.AddModelError("Path", "Path is required");
+            return View(model);
+        }
+
+        try
+        {
+            var secrets = new Dictionary<string, object>();
+
+            foreach (var kvp in model.KeyValuePairs.Where(k => !k.IsEmpty))
+            {
+                secrets[kvp.Key] = kvp.Value;
+            }
+
+            if (!secrets.Any())
+            {
+                ModelState.AddModelError("", "At least one key-value pair is required");
+                return View(model);
+            }
+
+            var success = await vaultService.CreateOrUpdateSecretAsync(model.Path, secrets);
+
+            if (success)
+            {
+                TempData["Success"] = $"Secret created successfully at path: {model.Path}";
+                return RedirectToAction(nameof(SecretDetail), new { path = model.Path });
+            }
+            else
+            {
+                model.Error = "Failed to create secret";
+                return View(model);
+            }
+        }
+        catch (Exception ex)
+        {
+            model.Error = ex.Message;
+            logger.LogError(ex, "Failed to create secret at path: {Path}", model.Path);
+            return View(model);
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> UpdateSecret(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        var model = new KvCreateUpdateViewModel
+        {
+            Path = path,
+            IsUpdate = true
+        };
+
+        try
+        {
+            var existingSecrets = await vaultService.GetAllSecretsAsync(path);
+            model.KeyValuePairs = existingSecrets.Select(kvp => new KvKeyValuePair
+            {
+                Key = kvp.Key,
+                Value = kvp.Value?.ToString() ?? ""
+            }).ToList();
+
+            // Add one empty row for new keys
+            model.KeyValuePairs.Add(new KvKeyValuePair());
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to load existing secret: {ex.Message}";
+            return RedirectToAction(nameof(Index));
+        }
+
+        return View("CreateSecret", model);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> DeleteSecret(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            TempData["Error"] = "Secret path is required";
+            return RedirectToAction(nameof(Index));
+        }
+
+        try
+        {
+            var success = await vaultService.DeleteSecretAsync(path);
+
+            if (success)
+            {
+                TempData["Success"] = $"Secret deleted successfully: {path}";
+            }
+            else
+            {
+                TempData["Error"] = $"Failed to delete secret: {path}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to delete secret: {ex.Message}";
+            logger.LogError(ex, "Failed to delete secret at path: {Path}", path);
+        }
+
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> DeleteSecretKey(string path, string key)
+    {
+        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(key))
+        {
+            TempData["Error"] = "Path and key are required";
+            return RedirectToAction(nameof(SecretDetail), new { path });
+        }
+
+        try
+        {
+            var success = await vaultService.DeleteSecretKeyAsync(path, key);
+
+            if (success)
+            {
+                TempData["Success"] = $"Secret key '{key}' deleted successfully";
+            }
+            else
+            {
+                TempData["Error"] = $"Failed to delete secret key: {key}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to delete secret key: {ex.Message}";
+            logger.LogError(ex, "Failed to delete secret key {Key} at path: {Path}", key, path);
+        }
+
+        return RedirectToAction(nameof(SecretDetail), new { path });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> AddSecretKey(string path, string key, string value)
+    {
+        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(key))
+        {
+            TempData["Error"] = "Path and key are required";
+            return RedirectToAction(nameof(SecretDetail), new { path });
+        }
+
+        try
+        {
+            var success = await vaultService.CreateOrUpdateSecretKeyAsync(path, key, value ?? "");
+
+            if (success)
+            {
+                TempData["Success"] = $"Secret key '{key}' added/updated successfully";
+            }
+            else
+            {
+                TempData["Error"] = $"Failed to add/update secret key: {key}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to add/update secret key: {ex.Message}";
+            logger.LogError(ex, "Failed to add/update secret key {Key} at path: {Path}", key, path);
+        }
+
+        return RedirectToAction(nameof(SecretDetail), new { path });
+    }
+
+    [HttpPost]
+    public IActionResult InvalidateCache(string path = "")
+    {
+        try
+        {
+            vaultService.InvalidateKvCache(string.IsNullOrEmpty(path) ? null : path);
+
+            if (string.IsNullOrEmpty(path))
+            {
+                TempData["Success"] = "All KV cache invalidated successfully";
+            }
+            else
+            {
+                TempData["Success"] = $"Cache invalidated for path: {path}";
+            }
+        }
+        catch (Exception ex)
+        {
+            TempData["Error"] = $"Failed to invalidate cache: {ex.Message}";
+            logger.LogError(ex, "Failed to invalidate KV cache for path: {Path}", path);
+        }
+
+        return RedirectToAction(nameof(Index), new { path });
+    }
+
+    public async Task<IActionResult> TestKv()
+    {
+        var model = new KvTestViewModel();
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            var value = await vaultService.GetSecretAsync(model.TestPath, model.TestKey);
+            stopwatch.Stop();
+
+            model.Success = true;
+            model.RetrievedValue = value;
+            model.TestExecutedAt = DateTime.UtcNow;
+            model.ResponseTime = stopwatch.Elapsed;
+
+            logger.LogInformation("KV test successful - Retrieved secret from {Path}/{Key}",
+                model.TestPath, model.TestKey);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            model.Success = false;
+            model.Error = ex.Message;
+            model.TestExecutedAt = DateTime.UtcNow;
+            model.ResponseTime = stopwatch.Elapsed;
+            logger.LogError(ex, "KV test failed for {Path}/{Key}", model.TestPath, model.TestKey);
+        }
+
+        return View(model);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> HealthCheck()
+    {
+        var health = new
+        {
+            timestamp = DateTime.UtcNow,
+            service = "KV Management",
+            vault = new { healthy = false, error = (string?)null, details = (object?)null }
+        };
+
+        try
+        {
+            // Test basic KV operations
+            var testSecrets = await vaultService.GetAllSecretsAsync("kv/myapp/config");
+
+            health = health with
+            {
+                vault = health.vault with
+                {
+                    healthy = true,
+                    details = new
+                    {
+                        secretCount = testSecrets.Count,
+                        testPath = "kv/myapp/config",
+                        cacheStatus = "active"
+                    }
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            health = health with { vault = health.vault with { error = ex.Message } };
+        }
+
+        return Json(health);
+    }
+}
