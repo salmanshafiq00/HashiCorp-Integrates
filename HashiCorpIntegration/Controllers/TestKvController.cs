@@ -44,28 +44,61 @@ public class TestKvController(
     {
         if (string.IsNullOrEmpty(path))
         {
-            var commonPaths = new[] {
+            // Load all available secrets by first getting all paths
+            try
+            {
+                var allPaths = await vaultService.ListSecretPathsAsync("");
+                var secretPaths = new List<string>();
+
+                // Recursively find all secret paths
+                await DiscoverAllSecretPaths("", secretPaths);
+
+                // Load secrets from discovered paths
+                foreach (var secretPath in secretPaths.Take(10)) // Limit to prevent UI overload
+                {
+                    try
+                    {
+                        var secrets = await vaultService.GetAllSecretsAsync(secretPath);
+                        model.Secrets.Add(new KvSecretViewModel
+                        {
+                            Path = secretPath,
+                            Data = secrets,
+                            RetrievedAt = DateTime.UtcNow
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to load secrets from path: {Path}", secretPath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to discover secret paths, falling back to common paths");
+
+                // Fallback to common paths if discovery fails
+                var commonPaths = new[] {
                 "hashicorp-integration/config",
                 "hashicorp-integration/environments/dev",
                 "hashicorp-integration/environments/prod"
             };
 
-            foreach (var commonPath in commonPaths)
-            {
-                try
+                foreach (var commonPath in commonPaths)
                 {
-                    var secrets = await vaultService.GetAllSecretsAsync(commonPath);
-                    model.Secrets.Add(new KvSecretViewModel
+                    try
                     {
-                        Path = commonPath,
-                        Data = secrets,
-                        RetrievedAt = DateTime.UtcNow
-                    });
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Failed to load secrets from common path: {Path}", commonPath);
-                    // Continue with other paths
+                        var secrets = await vaultService.GetAllSecretsAsync(commonPath);
+                        model.Secrets.Add(new KvSecretViewModel
+                        {
+                            Path = commonPath,
+                            Data = secrets,
+                            RetrievedAt = DateTime.UtcNow
+                        });
+                    }
+                    catch (Exception ex2)
+                    {
+                        logger.LogWarning(ex2, "Failed to load secrets from common path: {Path}", commonPath);
+                    }
                 }
             }
         }
@@ -86,6 +119,44 @@ public class TestKvController(
                 model.Error = $"Failed to load secrets from path '{path}': {ex.Message}";
                 logger.LogError(ex, "Failed to load secrets from path: {Path}", path);
             }
+        }
+    }
+
+    private async Task DiscoverAllSecretPaths(string basePath, List<string> secretPaths)
+    {
+        try
+        {
+            var paths = await vaultService.ListSecretPathsAsync(basePath);
+
+            foreach (var path in paths)
+            {
+                var fullPath = string.IsNullOrEmpty(basePath) ? path : $"{basePath}/{path}";
+
+                if (path.EndsWith("/"))
+                {
+                    // This is a directory, recurse into it
+                    await DiscoverAllSecretPaths(fullPath.TrimEnd('/'), secretPaths);
+                }
+                else
+                {
+                    // This is a secret, check if it exists and add to list
+                    try
+                    {
+                        if (await vaultService.SecretExistsAsync(fullPath))
+                        {
+                            secretPaths.Add(fullPath);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore errors for individual secret checks
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to discover paths under: {BasePath}", basePath);
         }
     }
 
@@ -172,6 +243,7 @@ public class TestKvController(
 
             if (success)
             {
+                vaultService.InvalidateKvCache();
                 TempData["Success"] = $"Secret created successfully at path: {model.Path}";
                 return RedirectToAction(nameof(SecretDetail), new { path = model.Path });
             }
@@ -347,7 +419,7 @@ public class TestKvController(
     {
         var model = new KvTestViewModel
         {
-            TestPath = "hashicorp-integration/config", 
+            TestPath = "hashicorp-integration/config",
             TestKey = "api_key"
         };
 

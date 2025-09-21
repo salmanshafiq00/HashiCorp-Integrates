@@ -35,4 +35,5 @@ public interface IVaultService
     Task<bool> DestroySecretAsync(string path, int version);
     Task<string> GetSecretAsync(string path, string key);
     Task<Dictionary<string, object>> GetSecretAsync(string path);
+    Task<List<string>> GetAllSecretPathsRecursiveAsync(string basePath = "", int maxDepth = 3, int currentDepth = 0);
 }

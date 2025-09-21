@@ -700,6 +700,52 @@ public class VaultService(
         }
     }
 
+    public async Task<List<string>> GetAllSecretPathsRecursiveAsync(string basePath = "", int maxDepth = 3, int currentDepth = 0)
+    {
+        var allPaths = new List<string>();
+
+        if (currentDepth >= maxDepth)
+            return allPaths;
+
+        try
+        {
+            var paths = await ListSecretPathsAsync(basePath);
+
+            foreach (var path in paths)
+            {
+                var fullPath = string.IsNullOrEmpty(basePath) ? path : $"{basePath}/{path}";
+
+                if (path.EndsWith("/"))
+                {
+                    // Directory - recurse
+                    var subPaths = await GetAllSecretPathsRecursiveAsync(fullPath.TrimEnd('/'), maxDepth, currentDepth + 1);
+                    allPaths.AddRange(subPaths);
+                }
+                else
+                {
+                    // Potential secret - verify it exists
+                    try
+                    {
+                        if (await SecretExistsAsync(fullPath))
+                        {
+                            allPaths.Add(fullPath);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore individual failures
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to get recursive paths for: {BasePath}", basePath);
+        }
+
+        return allPaths;
+    }
+
     #endregion
 
 }
