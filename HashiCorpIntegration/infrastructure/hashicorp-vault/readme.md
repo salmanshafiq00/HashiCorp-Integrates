@@ -14,6 +14,7 @@ This guide explains how to set up HashiCorp Vault with a SQL Server database for
 
 1. Open PowerShell in the project folder.
 2. Run the command to start Vault and SQL Server containers in detached mode:
+3. First ensure are in infrastructure\hashicorp-vault folder
 
 ```powershell
 docker-compose up -d
