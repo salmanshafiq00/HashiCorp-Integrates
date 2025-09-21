@@ -1,4 +1,4 @@
-# README.md: HashiCorp Vault + SQL Server Setup on Windows 11
+# README.md: HashiCorp Vault + SQL Server Setup
 
 ## Overview
 
