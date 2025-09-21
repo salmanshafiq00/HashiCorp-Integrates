@@ -50,8 +50,8 @@ public class KvKeyValuePair
 
 public class KvTestViewModel
 {
-    public string TestPath { get; set; } 
-    public string TestKey { get; set; } 
+    public string TestPath { get; set; } = string.Empty;
+    public string TestKey { get; set; } = string.Empty;
     public string? RetrievedValue { get; set; }
     public bool Success { get; set; }
     public string? Error { get; set; }

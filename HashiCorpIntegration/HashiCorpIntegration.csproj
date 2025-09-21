@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Folder Include="Models\KV-Secrets\" />
     <Folder Include="Views\" />
   </ItemGroup>
 

@@ -59,6 +59,9 @@ exit
 .\vault-setup.ps1
 ```
 
+## Step 4: For the first time use DefaultConnection for databse connection and then run Update-Database command
+## After migration again back to vault connection.
+
 The script will:
 
 * Wait for Vault and SQL Server to be ready.
@@ -143,6 +146,19 @@ docker exec hashicorp_vault vault read database/static-creds/app-static-role
 ```powershell
 docker exec hashicorp_vault vault kv get kv/hashicorp-integration/config
 ```
+
+## Reading KV Secrets from Vault using PowerShell
+
+Use the following PowerShell script to retrieve secret data from HashiCorp Vault's KV v2 engine:
+
+```powershell
+$vaultToken = "ISHw8d2gDei24Q0IOex4fMIciBLP3gFRs55pwCPi0RuJf6fXy7qxqhPTfqdMXwXV"
+$uri = "http://localhost:8200/v1/kv-v2/data/hashicorp-integration/config"
+$headers = @{ "X-Vault-Token" = $vaultToken }
+
+$response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+$response.data.data
+``` 
 
 ## Step 7: Optional - Make SQLCMD Permanent
 

@@ -41,9 +41,9 @@ BEGIN
 END
 "
 
-# 1. Enable KV v2 secrets engine
+# 1. Enable KV v2 secrets engine at default path
 Write-Host "`n1. Enabling KV v2 secrets engine..." -ForegroundColor Cyan
-docker exec hashicorp_vault vault secrets enable -path=kv kv-v2 2>$null
+docker exec hashicorp_vault vault secrets enable kv-v2 2>$null
 
 # 2. Enable Database secrets engine
 Write-Host "`n2. Enabling database secrets engine..." -ForegroundColor Cyan
@@ -95,21 +95,21 @@ docker exec hashicorp_vault vault write database/static-roles/app-static-role `
     username="vault_static_user" `
     rotation_period="24h"
 
-# 7. Create sample KV secrets
+# 7. Create sample KV secrets using default kv-v2 mount point
 Write-Host "`n7. Creating sample KV secrets..." -ForegroundColor Cyan
-docker exec hashicorp_vault vault kv put kv/hashicorp-integration/config `
+docker exec hashicorp_vault vault kv put kv-v2/hashicorp-integration/config `
     database_connection="Server=localhost,1434;Database=HashiCorpIntegration;Integrated Security=false;" `
     api_key="sample-api-key-12345" `
     jwt_secret="sample-jwt-secret-67890" `
     encryption_key="sample-encryption-key-abcdef"
 
-docker exec hashicorp_vault vault kv put kv/hashicorp-integration/environments/dev `
+docker exec hashicorp_vault vault kv put kv-v2/hashicorp-integration/environments/dev `
     environment="Development" `
     debug="true" `
     log_level="Debug" `
     external_api_url="https://api-dev.example.com"
 
-docker exec hashicorp_vault vault kv put kv/hashicorp-integration/environments/prod `
+docker exec hashicorp_vault vault kv put kv-v2/hashicorp-integration/environments/prod `
     environment="Production" `
     debug="false" `
     log_level="Warning" `
@@ -123,7 +123,7 @@ docker exec hashicorp_vault vault auth enable approle 2>$null
 Write-Host "`n9. Creating application policy..." -ForegroundColor Cyan
 $policyContent = @"
 # Policy for HashiCorp Integration Application
-path "kv/data/hashicorp-integration/*" {
+path "kv-v2/data/hashicorp-integration/*" {
   capabilities = ["read", "list"]
 }
 
@@ -174,7 +174,7 @@ Write-Host "`n# Test static credentials:" -ForegroundColor Gray
 Write-Host "docker exec hashicorp_vault vault read database/static-creds/app-static-role" -ForegroundColor White
 
 Write-Host "`n# Test KV secrets:" -ForegroundColor Gray
-Write-Host "docker exec hashicorp_vault vault kv get kv/hashicorp-integration/config" -ForegroundColor White
+Write-Host "docker exec hashicorp_vault vault kv get kv-v2/hashicorp-integration/config" -ForegroundColor White
 
 # Test the setup
 Write-Host "`n=== RUNNING TESTS ===" -ForegroundColor Magenta
@@ -185,4 +185,4 @@ Write-Host "`nTesting static credentials..." -ForegroundColor Yellow
 docker exec hashicorp_vault vault read database/static-creds/app-static-role
 
 Write-Host "`nTesting KV secrets..." -ForegroundColor Yellow
-docker exec hashicorp_vault vault kv get kv/hashicorp-integration/config
+docker exec hashicorp_vault vault kv get kv-v2/hashicorp-integration/config

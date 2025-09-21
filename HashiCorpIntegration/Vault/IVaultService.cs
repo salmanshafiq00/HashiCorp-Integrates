@@ -33,8 +33,6 @@ public interface IVaultService
     Task<Dictionary<string, object>> GetSecretVersionAsync(string path, int version);
     Task<bool> UndeleteSecretAsync(string path, int version);
     Task<bool> DestroySecretAsync(string path, int version);
-
-    // Common methods
     Task<string> GetSecretAsync(string path, string key);
     Task<Dictionary<string, object>> GetSecretAsync(string path);
 }

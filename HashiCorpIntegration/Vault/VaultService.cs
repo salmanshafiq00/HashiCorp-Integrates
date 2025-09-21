@@ -371,8 +371,6 @@ public class VaultService(
 
     #endregion
 
-    // Add these methods to your existing VaultService class
-
     #region KV Secret Management
 
     public async Task<Dictionary<string, object>> GetAllSecretsAsync(string path)
@@ -388,6 +386,9 @@ public class VaultService(
 
         try
         {
+            logger.LogInformation("Attempting to read secret from path: {Path}", path);
+            logger.LogInformation("Vault URL: {VaultUrl}", _vaultSettings.VaultUrl);
+
             var secret = await GetVaultClient().V1.Secrets.KeyValue.V2.ReadSecretAsync(path);
             if (secret?.Data?.Data != null)
             {
@@ -640,10 +641,6 @@ public class VaultService(
         }
     }
 
-    #endregion
-
-    #region Common Methods
-
     public async Task<string> GetSecretAsync(string path, string key)
     {
         var cacheKey = $"vault_secret_{path}_{key}";
@@ -704,4 +701,5 @@ public class VaultService(
     }
 
     #endregion
+
 }
